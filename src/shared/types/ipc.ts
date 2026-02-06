@@ -1,0 +1,44 @@
+// IPC channel names and payload types — full implementation in Phase 3
+
+export type IpcChannel =
+  // Request-response channels
+  | 'db:get-user'
+  | 'db:list-repos'
+  | 'db:add-repo'
+  | 'db:update-repo'
+  | 'db:delete-repo'
+  | 'db:list-workspaces'
+  | 'db:get-workspace'
+  | 'db:create-workspace'
+  | 'db:update-workspace'
+  | 'db:delete-workspace'
+  | 'workflow:list'
+  | 'workflow:get'
+  | 'workflow:create'
+  | 'workflow:update'
+  | 'workflow:delete'
+  | 'session:list'
+  | 'session:get'
+  | 'session:start'
+  | 'session:pause'
+  | 'session:resume'
+  | 'session:delete'
+  | 'agent:list'
+  | 'agent:get-messages'
+  | 'agent:send-input'
+  | 'agent:kill'
+  | 'approval:list-pending'
+  | 'approval:resolve'
+  | 'decision:list'
+  | 'decision:get'
+  | 'shell:open-external'
+  | 'shell:pick-folder';
+
+export type PushChannel =
+  | 'agent:token'
+  | 'agent:message'
+  | 'agent:status-change'
+  | 'agent:completed'
+  | 'approval:new'
+  | 'approval:resolved'
+  | 'session:status-change';

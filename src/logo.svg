@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <!-- The Crucible Gradient: ember base to gold tip -->
+    <linearGradient id="crucible" x1="256" y1="480" x2="256" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#c45a22"/>
+      <stop offset="45%" stop-color="#d4692e"/>
+      <stop offset="100%" stop-color="#dab257"/>
+    </linearGradient>
+    <!-- Inner glow for the chamber -->
+    <radialGradient id="chamber-glow" cx="50%" cy="55%" r="35%">
+      <stop offset="0%" stop-color="#d4692e" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#0e0d0c" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!--
+    The mark: a stylized athanor (alchemical furnace).
+
+    Outer shape: An upward-tapering vessel/flame form.
+    The rounded base is the crucible body; the pointed top
+    is the rising heat/transformation. The proportions create
+    a shape that reads as both "A" and "flame" simultaneously.
+
+    Inner void: A dark cutout representing the furnace chamber —
+    the space where transformation happens. This negative space
+    is the conceptual heart of the logo.
+  -->
+
+  <!-- Outer vessel / flame shape -->
+  <path
+    d="M256 32
+       C256 32, 196 100, 160 168
+       C124 236, 96 300, 96 352
+       C96 440, 166 480, 256 480
+       C346 480, 416 440, 416 352
+       C416 300, 388 236, 352 168
+       C316 100, 256 32, 256 32Z"
+    fill="url(#crucible)"
+  />
+
+  <!-- Inner chamber void -->
+  <path
+    d="M256 200
+       C256 200, 220 244, 204 284
+       C188 324, 176 352, 176 376
+       C176 412, 210 436, 256 436
+       C302 436, 336 412, 336 376
+       C336 352, 324 324, 308 284
+       C292 244, 256 200, 256 200Z"
+    fill="#0e0d0c"
+  />
+
+  <!-- Subtle inner glow in the chamber -->
+  <rect x="160" y="240" width="192" height="200" rx="96" fill="url(#chamber-glow)"/>
+</svg>
