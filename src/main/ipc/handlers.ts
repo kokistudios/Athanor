@@ -7,6 +7,7 @@ import { registerAgentHandlers } from './agent-handlers';
 import { registerWorkflowHandlers } from './workflow-handlers';
 import { registerApprovalHandlers } from './approval-handlers';
 import { setupStreamingBridge } from './streaming-bridge';
+import { registerArtifactHandlers } from './artifact-handlers';
 import { registerShellHandlers } from './shell-handlers';
 
 export function registerIpcHandlers(
@@ -18,6 +19,7 @@ export function registerIpcHandlers(
   registerAgentHandlers(db, services, mainWindow);
   registerWorkflowHandlers(db, services, mainWindow);
   registerApprovalHandlers(db, services, mainWindow);
+  registerArtifactHandlers(db, services.contentStore, mainWindow);
   registerShellHandlers(mainWindow);
   setupStreamingBridge(services, mainWindow);
 

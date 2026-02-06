@@ -764,6 +764,27 @@ button:disabled {
   border-left-color: var(--color-text-tertiary);
 }
 
+/* ------ Decision session group header ------ */
+
+.decision-session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  text-align: left;
+}
+
+.decision-session-header:hover {
+  background-color: var(--color-sidebar-hover);
+}
+
 /* ------ Card inner elements ------ */
 
 .card-meta {

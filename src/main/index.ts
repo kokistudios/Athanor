@@ -8,6 +8,7 @@ import { createServices, type ServiceRegistry } from './services/service-registr
 import type { Kysely } from 'kysely';
 import type { Database } from '../shared/types/database';
 import type { AthanorConfig } from '../shared/types/config';
+import type { ContentStore } from './services/content-store';
 
 app.name = 'Athanor';
 
@@ -75,6 +76,34 @@ async function bootstrap(): Promise<void> {
   console.log('Services initialized');
 }
 
+async function cleanupExpiredArtifacts(
+  database: Kysely<Database>,
+  contentStore: ContentStore,
+): Promise<void> {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const expired = await database
+    .selectFrom('artifacts')
+    .selectAll()
+    .where('pinned', '=', 0)
+    .where('created_at', '<', sevenDaysAgo)
+    .execute();
+
+  if (expired.length === 0) return;
+
+  for (const artifact of expired) {
+    await contentStore.delete(artifact.file_path);
+  }
+
+  await database
+    .deleteFrom('artifacts')
+    .where('pinned', '=', 0)
+    .where('created_at', '<', sevenDaysAgo)
+    .execute();
+
+  console.log(`Cleaned up ${expired.length} expired artifact(s)`);
+}
+
 const getIconPath = (): string => {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'icon_logo.png');
@@ -130,6 +159,7 @@ const createWindow = (): void => {
 app.on('ready', async () => {
   try {
     await bootstrap();
+    await cleanupExpiredArtifacts(db, services.contentStore);
   } catch (err) {
     console.error('Bootstrap failed:', err);
   }

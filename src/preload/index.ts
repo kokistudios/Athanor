@@ -30,7 +30,13 @@ const ALLOWED_REQUEST_CHANNELS = new Set<IpcChannel>([
   'approval:list-pending',
   'approval:resolve',
   'decision:list',
+  'decision:list-grouped',
   'decision:get',
+  'decision:update',
+  'decision:delete',
+  'artifact:read',
+  'artifact:toggle-pin',
+  'artifact:delete',
   'shell:open-external',
   'shell:pick-folder',
 ]);

@@ -91,6 +91,7 @@ export interface ArtifactTable {
   name: string;
   file_path: string;
   status: Generated<string>;
+  pinned: Generated<number>;
   created_at: Generated<string>;
   updated_at: Generated<string>;
 }

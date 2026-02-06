@@ -6,6 +6,7 @@ export interface ContentStore {
   read(key: string): Promise<Buffer>;
   exists(key: string): Promise<boolean>;
   delete(key: string): Promise<void>;
+  deleteTree(prefix: string): Promise<void>;
 }
 
 export class LocalContentStore implements ContentStore {
@@ -47,6 +48,15 @@ export class LocalContentStore implements ContentStore {
   async delete(key: string): Promise<void> {
     try {
       await fs.unlink(this.resolve(key));
+    } catch {
+      // ignore if already deleted
+    }
+  }
+
+  async deleteTree(prefix: string): Promise<void> {
+    const dir = this.resolve(prefix);
+    try {
+      await fs.rm(dir, { recursive: true, force: true });
     } catch {
       // ignore if already deleted
     }

@@ -225,7 +225,14 @@ export function registerWorkflowHandlers(
       .orderBy('created_at', 'desc')
       .execute();
 
-    return { ...session, agents, decisions };
+    const artifacts = await db
+      .selectFrom('artifacts')
+      .selectAll()
+      .where('session_id', '=', id)
+      .orderBy('created_at', 'asc')
+      .execute();
+
+    return { ...session, agents, decisions, artifacts };
   });
 
   registerSecureIpcHandler(
@@ -293,6 +300,12 @@ export function registerWorkflowHandlers(
       await db.deleteFrom('agents').where('session_id', '=', sessionId).execute();
       // 4. session itself
       await db.deleteFrom('sessions').where('id', '=', sessionId).execute();
+
+      // 5. Clean up on-disk files (messages per agent + artifacts per session)
+      for (const agentId of ids) {
+        await services.contentStore.deleteTree(`sessions/${agentId}`);
+      }
+      await services.contentStore.deleteTree(`sessions/${sessionId}`);
 
       return { success: true };
     },

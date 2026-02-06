@@ -4,11 +4,13 @@ import type { Database } from '../../shared/types/database';
 import * as m001 from './migrations/001_initial_schema';
 import * as m002 from './migrations/002_add_waiting_approval_status';
 import * as m003 from './migrations/003_add_session_description';
+import * as m004 from './migrations/004_add_artifact_pinned';
 
 const migrations: Record<string, Migration> = {
   '001_initial_schema': m001,
   '002_add_waiting_approval_status': m002,
   '003_add_session_description': m003,
+  '004_add_artifact_pinned': m004,
 };
 
 class InlineMigrationProvider implements MigrationProvider {

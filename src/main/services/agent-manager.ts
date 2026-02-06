@@ -45,6 +45,7 @@ export class AgentManager extends EventEmitter {
   private activeAgents = new Map<string, AgentProcess>();
   private escalationRequestKeys = new Set<string>();
   private completedAgentIds = new Set<string>();
+  private nudgedAgentIds = new Set<string>();
 
   constructor(
     private db: Kysely<Database>,
@@ -367,6 +368,27 @@ export class AgentManager extends EventEmitter {
             this.emit('agent:completed', { agentId });
           }
           this.terminateProcess(agentId);
+        } else if (agent && agent.status === 'running') {
+          // Agent finished its turn without calling athanor_phase_complete.
+          // Nudge it once to save artifacts and explicitly complete; if it
+          // finishes a second time without completing, terminate.
+          if (this.nudgedAgentIds.has(agentId)) {
+            this.nudgedAgentIds.delete(agentId);
+            this.terminateProcess(agentId);
+          } else {
+            this.nudgedAgentIds.add(agentId);
+            this.sendInput(agentId, [
+              'Your conversation turn ended but you have not called athanor_phase_complete.',
+              'Please:',
+              '1. Write your phase artifact via athanor_artifact (if you haven\'t already)',
+              '2. Call athanor_phase_complete with a summary of what you accomplished',
+              'These steps are required — the session cannot advance without them.',
+            ].join('\n')).catch((err) => {
+              console.error(`[agent] Failed to send completion nudge:`, err);
+              this.nudgedAgentIds.delete(agentId);
+              this.terminateProcess(agentId);
+            });
+          }
         }
         break;
       }
@@ -400,6 +422,8 @@ export class AgentManager extends EventEmitter {
   }
 
   private async handleAgentExit(agentId: string, code: number | null): Promise<void> {
+    this.nudgedAgentIds.delete(agentId);
+
     const agent = await this.db
       .selectFrom('agents')
       .selectAll()
