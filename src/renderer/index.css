@@ -605,6 +605,11 @@ button:disabled {
   background: var(--color-status-waiting);
 }
 
+.status-dot-waiting_approval {
+  background: var(--color-accent-gold);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
 /* ============================================================
    WARM GLOW — the signature effect
    ============================================================ */
@@ -1390,4 +1395,68 @@ button:disabled {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 20px;
+}
+
+/* ============================================================
+   TOAST NOTIFICATIONS
+   ============================================================ */
+
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes toast-slide-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+.toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 380px;
+  pointer-events: none;
+}
+
+.toast-item {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.25),
+    0 2px 6px rgba(0, 0, 0, 0.15);
+  animation: toast-slide-in 250ms var(--ease-out) both;
+  cursor: pointer;
+}
+
+.toast-item-exit {
+  animation: toast-slide-out 200ms var(--ease-in-out) both;
+}
+
+.light .toast-item {
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.08),
+    0 2px 6px rgba(0, 0, 0, 0.04);
 }

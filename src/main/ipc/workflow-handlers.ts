@@ -65,6 +65,7 @@ const sessionStartArgsSchema = z.tuple([
       workspaceId: uuidSchema,
       workflowId: uuidSchema,
       context: z.string().max(200_000).optional(),
+      description: z.string().max(1000).optional(),
     })
     .strict(),
 ]);

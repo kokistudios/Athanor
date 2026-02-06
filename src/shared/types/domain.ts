@@ -1,4 +1,4 @@
-export const SESSION_STATUSES = ['pending', 'active', 'paused', 'completed', 'failed'] as const;
+export const SESSION_STATUSES = ['pending', 'active', 'paused', 'completed', 'failed', 'waiting_approval'] as const;
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
 export const AGENT_STATUSES = ['spawning', 'running', 'waiting', 'completed', 'failed'] as const;

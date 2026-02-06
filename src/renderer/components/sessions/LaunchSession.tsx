@@ -23,6 +23,7 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [selectedWorkspace, setSelectedWorkspace] = useState('');
   const [selectedWorkflow, setSelectedWorkflow] = useState('');
+  const [description, setDescription] = useState('');
   const [context, setContext] = useState('');
   const [launching, setLaunching] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -52,8 +53,10 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
         userId: user.id,
         workspaceId: selectedWorkspace,
         workflowId: selectedWorkflow,
+        description: description || undefined,
         context: context || undefined,
       });
+      setDescription('');
       setContext('');
       setExpanded(false);
       onLaunched();
@@ -85,6 +88,17 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
         <button onClick={() => setExpanded(false)} className="btn-icon !w-7 !h-7">
           <X size={14} />
         </button>
+      </div>
+
+      <div className="mb-3">
+        <input
+          type="text"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Session title (optional)"
+          className="input-base w-full"
+          maxLength={200}
+        />
       </div>
 
       {noItems && (

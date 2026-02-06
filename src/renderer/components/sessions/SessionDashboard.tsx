@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useSessions } from '../../hooks/useSessions';
+import { useApprovals } from '../../hooks/useApprovals';
 import { SessionDetail } from './SessionDetail';
 import { LaunchSession } from './LaunchSession';
-import { Trash2, Folders, Clock, Layers, ChevronRight } from 'lucide-react';
+import { Trash2, Folders, Clock, Layers, ChevronRight, ShieldAlert } from 'lucide-react';
 import { secureMarkdownComponents } from '../shared/markdown-security';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 
@@ -14,6 +15,7 @@ const statusBadgeClass: Record<string, string> = {
   completed: 'badge-green',
   failed: 'badge-red',
   waiting: 'badge-gold',
+  waiting_approval: 'badge-gold',
   spawning: 'badge-ember',
   paused: 'badge-neutral',
   pending: 'badge-neutral',
@@ -25,6 +27,7 @@ const statusLabel: Record<string, string> = {
   completed: 'Completed',
   failed: 'Failed',
   waiting: 'Waiting',
+  waiting_approval: 'Awaiting Approval',
   spawning: 'Spawning',
   paused: 'Paused',
   pending: 'Pending',
@@ -40,7 +43,15 @@ export function SessionDashboard({
   onSelectSession,
 }: SessionDashboardProps): React.ReactElement {
   const { sessions, loading, refetch } = useSessions();
+  const { approvals } = useApprovals();
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; label: string } | null>(null);
+
+  // Build per-session approval counts
+  const approvalCountBySession: Record<string, number> = {};
+  for (const approval of approvals) {
+    approvalCountBySession[approval.session_id] =
+      (approvalCountBySession[approval.session_id] || 0) + 1;
+  }
 
   if (selectedSessionId) {
     return <SessionDetail sessionId={selectedSessionId} onBack={() => onSelectSession('')} />;
@@ -60,78 +71,87 @@ export function SessionDashboard({
           {loading && <div className="text-text-tertiary text-[0.8125rem] mt-4">Loading...</div>}
 
           <div className="stagger-children">
-            {sessions.map((session) => (
-              <div
-                key={session.id}
-                className={`card card-accent-left card-accent-${session.status} mb-3 group`}
-              >
-                <button
-                  onClick={() => onSelectSession(session.id)}
-                  className="relative z-[1] flex-1 w-full p-6 pl-7 border-none bg-transparent text-left cursor-pointer text-text-primary"
+            {sessions.map((session) => {
+              const approvalCount = approvalCountBySession[session.id] || 0;
+              return (
+                <div
+                  key={session.id}
+                  className={`card card-accent-left card-accent-${session.status === 'waiting_approval' ? 'waiting' : session.status} mb-3 group`}
                 >
-                  {/* Header: status + title + badges */}
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className={`status-dot status-dot-${session.status}`} />
-                    <span className="card-title flex-1 min-w-0 truncate">
-                      Session {session.id.slice(0, 8)}
-                    </span>
-                    <span
-                      className={`badge ${statusBadgeClass[session.status] || 'badge-neutral'}`}
-                    >
-                      {statusLabel[session.status] || session.status}
-                    </span>
-                    {session.current_phase !== null && (
-                      <span className="badge badge-ember flex items-center gap-1">
-                        <Layers size={10} strokeWidth={2} />
-                        Phase {session.current_phase}
+                  <button
+                    onClick={() => onSelectSession(session.id)}
+                    className="relative z-[1] flex-1 w-full p-6 pl-7 border-none bg-transparent text-left cursor-pointer text-text-primary"
+                  >
+                    {/* Header: status + title + badges */}
+                    <div className="flex items-center gap-3 mb-2">
+                      <span className={`status-dot status-dot-${session.status}`} />
+                      <span className="card-title flex-1 min-w-0 truncate">
+                        Session {session.id.slice(0, 8)}
                       </span>
-                    )}
-                    <ChevronRight
-                      size={14}
-                      strokeWidth={2}
-                      className="text-text-tertiary opacity-0 group-hover:opacity-60 transition-opacity duration-150 flex-shrink-0"
-                    />
-                  </div>
-
-                  {/* Context preview */}
-                  {session.context && (
-                    <div className="card-context-preview mb-3">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={secureMarkdownComponents}
+                      <span
+                        className={`badge ${statusBadgeClass[session.status] || 'badge-neutral'}`}
                       >
-                        {session.context}
-                      </ReactMarkdown>
+                        {statusLabel[session.status] || session.status}
+                      </span>
+                      {approvalCount > 0 && (
+                        <span className="badge badge-red flex items-center gap-1">
+                          <ShieldAlert size={10} strokeWidth={2} />
+                          {approvalCount}
+                        </span>
+                      )}
+                      {session.current_phase !== null && (
+                        <span className="badge badge-ember flex items-center gap-1">
+                          <Layers size={10} strokeWidth={2} />
+                          Phase {session.current_phase + 1}
+                        </span>
+                      )}
+                      <ChevronRight
+                        size={14}
+                        strokeWidth={2}
+                        className="text-text-tertiary opacity-0 group-hover:opacity-60 transition-opacity duration-150 flex-shrink-0"
+                      />
                     </div>
-                  )}
 
-                  {/* Footer: meta info */}
-                  <div className="card-meta">
-                    <span className="flex items-center gap-1.5">
-                      <Clock size={10} strokeWidth={2} />
-                      {new Date(session.created_at).toLocaleString()}
-                    </span>
-                    <span className="text-text-tertiary opacity-40">|</span>
-                    <span className="font-mono text-[0.625rem] text-text-tertiary opacity-50">
-                      {session.id.slice(0, 12)}
-                    </span>
-                  </div>
-                </button>
+                    {/* Context preview */}
+                    {session.context && (
+                      <div className="card-context-preview mb-3">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={secureMarkdownComponents}
+                        >
+                          {session.context}
+                        </ReactMarkdown>
+                      </div>
+                    )}
 
-                {/* Delete action — positioned absolutely */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setDeleteTarget({ id: session.id, label: session.id.slice(0, 8) });
-                  }}
-                  className="btn-icon !w-7 !h-7 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-                  title="Delete session"
-                  style={{ position: 'absolute', top: 12, right: 12, zIndex: 2 }}
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            ))}
+                    {/* Footer: meta info */}
+                    <div className="card-meta">
+                      <span className="flex items-center gap-1.5">
+                        <Clock size={10} strokeWidth={2} />
+                        {new Date(session.created_at).toLocaleString()}
+                      </span>
+                      <span className="text-text-tertiary opacity-40">|</span>
+                      <span className="font-mono text-[0.625rem] text-text-tertiary opacity-50">
+                        {session.id.slice(0, 12)}
+                      </span>
+                    </div>
+                  </button>
+
+                  {/* Delete action — positioned absolutely */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteTarget({ id: session.id, label: session.id.slice(0, 8) });
+                    }}
+                    className="btn-icon !w-7 !h-7 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                    title="Delete session"
+                    style={{ position: 'absolute', top: 12, right: 12, zIndex: 2 }}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              );
+            })}
           </div>
 
           {!loading && sessions.length === 0 && (

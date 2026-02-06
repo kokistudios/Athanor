@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import * as crypto from 'crypto';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../shared/types/database';
@@ -5,19 +6,21 @@ import type { AgentManager } from './agent-manager';
 import type { ApprovalRouter } from './approval-router';
 import type { WorktreeManager } from './worktree-manager';
 import type { AthanorConfig } from '../../shared/types/config';
+import { buildSystemPreamble } from '../prompts/system-preamble';
 
 export interface StartSessionOptions {
   userId: string;
   workspaceId: string;
   workflowId: string;
   context?: string;
+  description?: string;
 }
 
 interface WorkflowPhaseConfig {
   permission_mode?: string;
 }
 
-export class WorkflowEngine {
+export class WorkflowEngine extends EventEmitter {
   constructor(
     private db: Kysely<Database>,
     private agentManager: AgentManager,
@@ -25,6 +28,8 @@ export class WorkflowEngine {
     private worktreeManager: WorktreeManager,
     private config: AthanorConfig,
   ) {
+    super();
+
     // Listen for agent completion to handle phase advancement
     this.agentManager.on('agent:completed', async ({ agentId }: { agentId: string }) => {
       try {
@@ -34,6 +39,32 @@ export class WorkflowEngine {
       }
     });
   }
+
+  // ── Helpers ──────────────────────────────────────────────────
+
+  private async setSessionStatus(sessionId: string, status: string, extra?: Record<string, unknown>): Promise<void> {
+    await this.db
+      .updateTable('sessions')
+      .set({ status, ...extra } as Record<string, unknown>)
+      .where('id', '=', sessionId)
+      .execute();
+
+    this.emit('session:status-change', { sessionId, status });
+  }
+
+  private async hasPendingPhaseGate(sessionId: string): Promise<boolean> {
+    const row = await this.db
+      .selectFrom('approvals')
+      .select('id')
+      .where('session_id', '=', sessionId)
+      .where('type', '=', 'phase_gate')
+      .where('status', '=', 'pending')
+      .executeTakeFirst();
+
+    return !!row;
+  }
+
+  // ── Session lifecycle ───────────────────────────────────────
 
   async startSession(opts: StartSessionOptions): Promise<string> {
     const sessionId = crypto.randomUUID();
@@ -58,11 +89,14 @@ export class WorkflowEngine {
         user_id: opts.userId,
         workspace_id: opts.workspaceId,
         workflow_id: opts.workflowId,
+        description: opts.description || null,
         status: 'active',
         current_phase: phases[0].ordinal,
         context: opts.context || null,
       })
       .execute();
+
+    this.emit('session:status-change', { sessionId, status: 'active' });
 
     const firstPhase = phases[0];
 
@@ -74,7 +108,7 @@ export class WorkflowEngine {
         summary: `Approve starting phase "${firstPhase.name}"?`,
         payload: { phaseId: firstPhase.id, phaseName: firstPhase.name, direction: 'before' },
       });
-      // Session waits — approval resolution triggers advancePhase
+      await this.setSessionStatus(sessionId, 'waiting_approval');
     } else {
       await this.launchPhaseAgent(sessionId, firstPhase);
     }
@@ -101,14 +135,9 @@ export class WorkflowEngine {
 
     if (nextIdx >= phases.length) {
       // All phases complete
-      await this.db
-        .updateTable('sessions')
-        .set({
-          status: 'completed',
-          completed_at: new Date().toISOString(),
-        })
-        .where('id', '=', sessionId)
-        .execute();
+      await this.setSessionStatus(sessionId, 'completed', {
+        completed_at: new Date().toISOString(),
+      });
       return;
     }
 
@@ -121,6 +150,13 @@ export class WorkflowEngine {
       .where('id', '=', sessionId)
       .execute();
 
+    this.emit('phase:advanced', {
+      sessionId,
+      phaseName: nextPhase.name,
+      phaseNumber: nextIdx + 1,
+      totalPhases: phases.length,
+    });
+
     // Check for 'before' gate
     if (nextPhase.approval === 'before') {
       await this.approvalRouter.createApproval({
@@ -129,6 +165,7 @@ export class WorkflowEngine {
         summary: `Approve starting phase "${nextPhase.name}"?`,
         payload: { phaseId: nextPhase.id, phaseName: nextPhase.name, direction: 'before' },
       });
+      await this.setSessionStatus(sessionId, 'waiting_approval');
     } else {
       await this.launchPhaseAgent(sessionId, nextPhase);
     }
@@ -145,6 +182,12 @@ export class WorkflowEngine {
       config: string | null;
     },
   ): Promise<void> {
+    // Guard: don't launch if there's a pending phase gate
+    if (await this.hasPendingPhaseGate(sessionId)) {
+      console.warn(`[WorkflowEngine] Blocked launch for session ${sessionId} — pending phase gate exists`);
+      return;
+    }
+
     // Look up workspace and repo for worktree
     const session = await this.db
       .selectFrom('sessions')
@@ -163,6 +206,15 @@ export class WorkflowEngine {
       .selectAll()
       .where('id', '=', workspace.repo_id)
       .executeTakeFirstOrThrow();
+
+    // Build shared system prompt
+    const systemPrompt = buildSystemPreamble({
+      sessionId,
+      phaseId: phase.id,
+      phaseName: phase.name,
+      repoName: repo.name,
+      repoPath: repo.local_path,
+    });
 
     // Create worktree
     const { dir, branch } = await this.worktreeManager.createWorktree(
@@ -205,14 +257,17 @@ export class WorkflowEngine {
         // ignore parse error
       }
     }
+    // Workflow agents run in isolated worktrees and must call MCP tools
+    // (athanor_phase_complete) to signal completion — default to bypassPermissions.
     const permissionMode =
-      phaseConfig.permission_mode || this.config.claude.default_permission_mode;
+      phaseConfig.permission_mode || 'bypassPermissions';
 
     await this.agentManager.spawnAgent({
       sessionId,
       phaseId: phase.id,
       name: phase.name,
       prompt,
+      systemPrompt,
       worktreePath: dir,
       branch,
       allowedTools,
@@ -252,6 +307,7 @@ export class WorkflowEngine {
           agentId: agent.id,
         },
       });
+      await this.setSessionStatus(agent.session_id, 'waiting_approval');
     } else {
       // Auto-advance
       await this.advancePhase(agent.session_id);
@@ -259,6 +315,17 @@ export class WorkflowEngine {
   }
 
   async pauseSession(sessionId: string): Promise<void> {
+    // Check current status — cannot pause a waiting_approval session
+    const session = await this.db
+      .selectFrom('sessions')
+      .select('status')
+      .where('id', '=', sessionId)
+      .executeTakeFirstOrThrow();
+
+    if (session.status === 'waiting_approval') {
+      throw new Error('Cannot pause a session that is waiting for approval — no agent to kill');
+    }
+
     // Kill active agents for this session
     const agents = this.agentManager.getActiveAgents().filter((a) => a.sessionId === sessionId);
 
@@ -266,11 +333,7 @@ export class WorkflowEngine {
       await this.agentManager.killAgent(agent.id);
     }
 
-    await this.db
-      .updateTable('sessions')
-      .set({ status: 'paused' })
-      .where('id', '=', sessionId)
-      .execute();
+    await this.setSessionStatus(sessionId, 'paused');
   }
 
   async resumeSession(sessionId: string): Promise<void> {
@@ -280,17 +343,11 @@ export class WorkflowEngine {
       .where('id', '=', sessionId)
       .executeTakeFirstOrThrow();
 
-    if (session.status !== 'paused') {
-      throw new Error('Session is not paused');
+    if (session.status !== 'paused' && session.status !== 'waiting_approval') {
+      throw new Error('Session is not paused or waiting_approval');
     }
 
-    await this.db
-      .updateTable('sessions')
-      .set({ status: 'active' })
-      .where('id', '=', sessionId)
-      .execute();
-
-    // Re-launch the current phase
+    // Look up current phase
     const phase = await this.db
       .selectFrom('workflow_phases')
       .selectAll()
@@ -298,6 +355,24 @@ export class WorkflowEngine {
       .where('ordinal', '=', session.current_phase!)
       .executeTakeFirstOrThrow();
 
+    // If phase has a 'before' gate, check for pending gate
+    if (phase.approval === 'before') {
+      const hasPending = await this.hasPendingPhaseGate(sessionId);
+      if (!hasPending) {
+        // Re-create the gate approval
+        await this.approvalRouter.createApproval({
+          sessionId,
+          type: 'phase_gate',
+          summary: `Approve starting phase "${phase.name}"?`,
+          payload: { phaseId: phase.id, phaseName: phase.name, direction: 'before' },
+        });
+      }
+      await this.setSessionStatus(sessionId, 'waiting_approval');
+      return;
+    }
+
+    // No gate required — set active and launch agent
+    await this.setSessionStatus(sessionId, 'active');
     await this.launchPhaseAgent(sessionId, phase);
   }
 
@@ -309,6 +384,9 @@ export class WorkflowEngine {
     const payload = approval.payload ? JSON.parse(approval.payload) : {};
 
     if (approval.status === 'approved') {
+      // Set status back to active before launching
+      await this.setSessionStatus(approval.session_id, 'active');
+
       if (payload.direction === 'before') {
         // Launch the phase agent
         const phase = await this.db
@@ -323,12 +401,72 @@ export class WorkflowEngine {
         await this.advancePhase(approval.session_id);
       }
     } else if (approval.status === 'rejected') {
-      // Session paused on rejection
-      await this.db
-        .updateTable('sessions')
-        .set({ status: 'paused' })
-        .where('id', '=', approval.session_id)
-        .execute();
+      // Keep session in waiting_approval — re-create the approval with [Retry] prefix
+      await this.approvalRouter.createApproval({
+        sessionId: approval.session_id,
+        agentId: approval.agent_id || undefined,
+        type: 'phase_gate',
+        summary: `[Retry] ${approval.summary}`,
+        payload,
+      });
+      await this.setSessionStatus(approval.session_id, 'waiting_approval');
+    }
+  }
+
+  // ── Startup recovery ────────────────────────────────────────
+
+  async recoverSessions(): Promise<void> {
+    // Fix 'active' sessions with no running agents → paused
+    const activeSessions = await this.db
+      .selectFrom('sessions')
+      .selectAll()
+      .where('status', '=', 'active')
+      .execute();
+
+    const runningAgentSessionIds = new Set(
+      this.agentManager.getActiveAgents().map((a) => a.sessionId),
+    );
+
+    for (const session of activeSessions) {
+      if (!runningAgentSessionIds.has(session.id)) {
+        console.warn(`[WorkflowEngine] Recovering orphaned active session ${session.id} → paused`);
+        await this.setSessionStatus(session.id, 'paused');
+      }
+    }
+
+    // Fix 'waiting_approval' sessions with missing approvals → re-create them
+    const waitingSessions = await this.db
+      .selectFrom('sessions')
+      .selectAll()
+      .where('status', '=', 'waiting_approval')
+      .execute();
+
+    for (const session of waitingSessions) {
+      const hasPending = await this.hasPendingPhaseGate(session.id);
+      if (!hasPending && session.current_phase !== null) {
+        const phase = await this.db
+          .selectFrom('workflow_phases')
+          .selectAll()
+          .where('workflow_id', '=', session.workflow_id)
+          .where('ordinal', '=', session.current_phase)
+          .executeTakeFirst();
+
+        if (phase && (phase.approval === 'before' || phase.approval === 'after')) {
+          console.warn(
+            `[WorkflowEngine] Re-creating missing gate approval for session ${session.id}`,
+          );
+          await this.approvalRouter.createApproval({
+            sessionId: session.id,
+            type: 'phase_gate',
+            summary: `[Recovered] Approve phase "${phase.name}"?`,
+            payload: {
+              phaseId: phase.id,
+              phaseName: phase.name,
+              direction: phase.approval,
+            },
+          });
+        }
+      }
     }
   }
 }

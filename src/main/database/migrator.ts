@@ -2,9 +2,13 @@ import { Migrator, type Migration, type MigrationProvider } from 'kysely';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../shared/types/database';
 import * as m001 from './migrations/001_initial_schema';
+import * as m002 from './migrations/002_add_waiting_approval_status';
+import * as m003 from './migrations/003_add_session_description';
 
 const migrations: Record<string, Migration> = {
   '001_initial_schema': m001,
+  '002_add_waiting_approval_status': m002,
+  '003_add_session_description': m003,
 };
 
 class InlineMigrationProvider implements MigrationProvider {

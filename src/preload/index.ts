@@ -43,6 +43,7 @@ const ALLOWED_PUSH_CHANNELS = new Set<PushChannel>([
   'approval:new',
   'approval:resolved',
   'session:status-change',
+  'phase:advanced',
 ]);
 
 function assertAllowedRequestChannel(channel: string): asserts channel is IpcChannel {

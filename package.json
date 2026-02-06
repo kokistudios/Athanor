@@ -14,7 +14,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\"",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
-    "build:mcp": "tsc -p tsconfig.mcp.json && cd dist/mcp && npm install --omit=dev better-sqlite3 kysely 2>/dev/null || true"
+    "build:mcp": "tsc -p tsconfig.mcp.json && cd dist/mcp && echo '{\"name\":\"athanor-mcp\",\"private\":true}' > package.json && npm install --omit=dev better-sqlite3 kysely @modelcontextprotocol/sdk zod"
   },
   "keywords": [],
   "author": {

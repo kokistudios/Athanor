@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createMcpDatabase } from './db';
@@ -17,6 +18,11 @@ if (!dbPath || !agentId || !sessionId || !phaseId || !dataDir) {
   console.error(
     'Missing required environment variables: ATHANOR_DB_PATH, ATHANOR_AGENT_ID, ATHANOR_SESSION_ID, ATHANOR_PHASE_ID, ATHANOR_DATA_DIR',
   );
+  process.exit(1);
+}
+
+if (!fs.existsSync(dbPath)) {
+  console.error(`Database file not found: ${dbPath}`);
   process.exit(1);
 }
 
@@ -79,6 +85,14 @@ server.tool(
 );
 
 async function main() {
+  // Validate that the database has the expected schema
+  try {
+    await db.selectFrom('decisions').select('id').limit(1).execute();
+  } catch (err) {
+    console.error('Database schema validation failed — expected "decisions" table:', err);
+    process.exit(1);
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('Athanor MCP server started');

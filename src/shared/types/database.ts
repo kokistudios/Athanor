@@ -50,6 +50,7 @@ export interface SessionTable {
   user_id: string;
   workspace_id: string;
   workflow_id: string;
+  description: string | null;
   status: Generated<string>;
   current_phase: number | null;
   context: string | null;

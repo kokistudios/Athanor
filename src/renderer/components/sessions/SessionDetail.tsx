@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowLeft, Pause, Play, Folders } from 'lucide-react';
+import { ArrowLeft, Pause, Play, Folders, ShieldAlert } from 'lucide-react';
 import { secureMarkdownComponents } from '../shared/markdown-security';
+import { ApprovalCard } from '../approvals/ApprovalCard';
+import { useApprovals } from '../../hooks/useApprovals';
 
 interface SessionData {
   id: string;
@@ -33,6 +35,9 @@ interface SessionDetailProps {
 
 export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.ReactElement {
   const [session, setSession] = useState<SessionData | null>(null);
+  const { approvals, resolve } = useApprovals();
+
+  const sessionApprovals = approvals.filter((a) => a.session_id === sessionId);
 
   useEffect(() => {
     async function load() {
@@ -44,6 +49,16 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
       }
     }
     load();
+
+    // Re-fetch on session status changes
+    const cleanupStatus = window.athanor.on('session:status-change' as never, (data: unknown) => {
+      const { sessionId: changedId } = data as { sessionId: string };
+      if (changedId === sessionId) {
+        load();
+      }
+    });
+
+    return cleanupStatus;
   }, [sessionId]);
 
   if (!session) {
@@ -56,6 +71,7 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
     paused: 'badge-gold',
     completed: 'badge-green',
     failed: 'badge-red',
+    waiting_approval: 'badge-gold',
   };
 
   return (
@@ -72,11 +88,17 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
           <Folders size={18} strokeWidth={1.75} className="text-accent-ember" />
           <h2>Session {session.id.slice(0, 8)}</h2>
           <span className={`badge ${statusBadge[session.status] || 'badge-neutral'}`}>
-            {session.status}
+            {session.status === 'waiting_approval' ? 'Awaiting Approval' : session.status}
           </span>
+          {sessionApprovals.length > 0 && (
+            <span className="badge badge-red flex items-center gap-1">
+              <ShieldAlert size={10} strokeWidth={2} />
+              Blocked
+            </span>
+          )}
           {session.current_phase !== null && (
             <span className="text-[0.6875rem] text-text-tertiary">
-              Phase {session.current_phase}
+              Phase {session.current_phase + 1}
             </span>
           )}
         </div>
@@ -94,6 +116,33 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
             </div>
           )}
 
+          {/* Waiting for gate approval indicator */}
+          {session.status === 'waiting_approval' && sessionApprovals.length === 0 && (
+            <div className="card card-static p-5 mb-7 flex items-center gap-3" style={{ borderLeft: '3px solid var(--color-accent-gold)' }}>
+              <span className="status-dot status-dot-waiting_approval" />
+              <span className="text-[0.875rem] text-accent-gold">Waiting for gate approval</span>
+            </div>
+          )}
+
+          {/* Pending approvals for this session */}
+          {sessionApprovals.length > 0 && (
+            <div className="mb-7">
+              <h3 className="text-[0.75rem] font-semibold tracking-[0.04em] uppercase text-text-tertiary mb-4 flex items-center gap-2">
+                <ShieldAlert size={13} strokeWidth={2} className="text-accent-ember" />
+                Pending Approvals
+              </h3>
+              <div className="stagger-children">
+                {sessionApprovals.map((approval) => (
+                  <ApprovalCard
+                    key={approval.id}
+                    approval={approval}
+                    onResolve={(id, status, response) => resolve(id, status, response)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-7">
             {/* Agents */}
             <div className="flex-1">
@@ -102,7 +151,7 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
               </h3>
               <div className="stagger-children">
                 {session.agents.map((agent) => (
-                  <div key={agent.id} className="card card-static p-4 mb-3 flex items-center gap-4">
+                  <div key={agent.id} className="card card-static p-5 mb-3 flex items-center gap-4">
                     <span className={`status-dot status-dot-${agent.status}`} />
                     <div>
                       <div className="text-[0.875rem] text-text-primary font-medium">

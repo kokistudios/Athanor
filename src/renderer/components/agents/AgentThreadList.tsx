@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AgentThread } from './AgentThread';
-import { PanelLeftClose, PanelLeftOpen, UsersRound } from 'lucide-react';
+import { ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen, UsersRound } from 'lucide-react';
 
 interface Agent {
   id: string;
@@ -9,11 +9,30 @@ interface Agent {
   name: string;
   status: string;
   created_at: string;
+  session_description: string | null;
+  session_status: string;
+  session_current_phase: number | null;
+  session_total_phases: number;
+  session_created_at: string;
+  workflow_name: string;
+}
+
+interface SessionGroup {
+  sessionId: string;
+  label: string;
+  status: string;
+  currentPhase: number | null;
+  totalPhases: number;
+  agents: Agent[];
 }
 
 interface AgentThreadListProps {
   selectedAgentId?: string;
   onSelectAgent: (id: string) => void;
+}
+
+function shortId(uuid: string): string {
+  return uuid.slice(0, 8);
 }
 
 export function AgentThreadList({
@@ -22,6 +41,7 @@ export function AgentThreadList({
 }: AgentThreadListProps): React.ReactElement {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [threadsCollapsed, setThreadsCollapsed] = useState(false);
+  const [collapsedSessions, setCollapsedSessions] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     async function load() {
@@ -34,12 +54,54 @@ export function AgentThreadList({
     }
     load();
 
-    const cleanup = window.athanor.on('agent:status-change' as never, () => {
+    const cleanupAgent = window.athanor.on('agent:status-change' as never, () => {
+      load();
+    });
+    const cleanupSession = window.athanor.on('session:status-change' as never, () => {
+      load();
+    });
+    const cleanupPhase = window.athanor.on('phase:advanced' as never, () => {
       load();
     });
 
-    return cleanup;
+    return () => {
+      cleanupAgent();
+      cleanupSession();
+      cleanupPhase();
+    };
   }, []);
+
+  const sessionGroups = useMemo<SessionGroup[]>(() => {
+    const map = new Map<string, SessionGroup>();
+    for (const agent of agents) {
+      let group = map.get(agent.session_id);
+      if (!group) {
+        group = {
+          sessionId: agent.session_id,
+          label: agent.session_description || agent.workflow_name || shortId(agent.session_id),
+          status: agent.session_status,
+          currentPhase: agent.session_current_phase,
+          totalPhases: agent.session_total_phases,
+          agents: [],
+        };
+        map.set(agent.session_id, group);
+      }
+      group.agents.push(agent);
+    }
+    return Array.from(map.values());
+  }, [agents]);
+
+  const toggleSession = (sessionId: string) => {
+    setCollapsedSessions((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) {
+        next.delete(sessionId);
+      } else {
+        next.add(sessionId);
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="flex h-full">
@@ -104,70 +166,157 @@ export function AgentThreadList({
                 No agents running. Start a session to spawn agents.
               </div>
             )}
-            <div className="flex flex-col gap-0.5 stagger-children">
-              {agents.map((agent) => {
-                const isSelected = selectedAgentId === agent.id;
+            <div className="flex flex-col gap-1">
+              {sessionGroups.map((group) => {
+                const isCollapsed = collapsedSessions.has(group.sessionId);
+                const hasSelectedAgent = group.agents.some((a) => a.id === selectedAgentId);
                 return (
-                  <button
-                    key={agent.id}
-                    onClick={() => onSelectAgent(agent.id)}
-                    style={{
-                      position: 'relative',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 4,
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '10px 12px',
-                      border: 'none',
-                      borderRadius: 6,
-                      cursor: 'pointer',
-                      transition: 'all 100ms ease',
-                      color: isSelected
-                        ? 'var(--color-text-primary)'
-                        : 'var(--color-text-secondary)',
-                      background: isSelected ? 'var(--color-sidebar-active-bg)' : 'transparent',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isSelected) {
-                        e.currentTarget.style.background = 'var(--color-sidebar-hover)';
-                        e.currentTarget.style.color = 'var(--color-text-primary)';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isSelected) {
-                        e.currentTarget.style.background = 'transparent';
-                        e.currentTarget.style.color = 'var(--color-text-secondary)';
-                      }
-                    }}
-                  >
-                    {isSelected && (
-                      <span
-                        style={{
-                          position: 'absolute',
-                          left: 0,
-                          top: '50%',
-                          transform: 'translateY(-50%)',
-                          width: 3,
-                          height: 18,
-                          borderRadius: 2,
-                          background: 'var(--color-accent-ember)',
-                        }}
-                      />
-                    )}
-                    <span style={{ fontSize: '0.8125rem', fontWeight: 500 }}>{agent.name}</span>
-                    <span
+                  <div key={group.sessionId}>
+                    {/* Session folder header */}
+                    <button
+                      onClick={() => toggleSession(group.sessionId)}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: 6,
-                        fontSize: '0.6875rem',
+                        gap: 4,
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '6px 8px',
+                        border: 'none',
+                        borderRadius: 4,
+                        cursor: 'pointer',
+                        background: 'transparent',
+                        transition: 'background 100ms ease',
+                        color: hasSelectedAgent
+                          ? 'var(--color-text-primary)'
+                          : 'var(--color-text-secondary)',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'var(--color-sidebar-hover)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
                       }}
                     >
-                      <span className={`status-dot status-dot-${agent.status}`} />
-                      <span style={{ color: 'var(--color-text-tertiary)' }}>{agent.status}</span>
-                    </span>
-                  </button>
+                      {isCollapsed ? (
+                        <ChevronRight size={12} style={{ flexShrink: 0, opacity: 0.5 }} />
+                      ) : (
+                        <ChevronDown size={12} style={{ flexShrink: 0, opacity: 0.5 }} />
+                      )}
+                      <span
+                        style={{
+                          fontSize: '0.6875rem',
+                          fontWeight: 600,
+                          letterSpacing: '0.02em',
+                          textTransform: 'uppercase',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          flex: 1,
+                        }}
+                      >
+                        {group.label}
+                      </span>
+                      {group.totalPhases > 0 && (
+                        <span
+                          style={{
+                            fontSize: '0.5625rem',
+                            fontWeight: 600,
+                            color: group.status === 'completed'
+                              ? 'var(--color-accent-green)'
+                              : 'var(--color-accent-ember)',
+                            background: group.status === 'completed'
+                              ? 'color-mix(in srgb, var(--color-accent-green) 12%, transparent)'
+                              : 'color-mix(in srgb, var(--color-accent-ember) 12%, transparent)',
+                            padding: '1px 5px',
+                            borderRadius: 3,
+                            flexShrink: 0,
+                          }}
+                        >
+                          {group.status === 'completed'
+                            ? `${group.totalPhases}/${group.totalPhases}`
+                            : `${(group.currentPhase ?? 0) + 1}/${group.totalPhases}`}
+                        </span>
+                      )}
+                    </button>
+
+                    {/* Agent list within session */}
+                    {!isCollapsed && (
+                      <div className="flex flex-col gap-0.5" style={{ paddingLeft: 8 }}>
+                        {group.agents.map((agent) => {
+                          const isSelected = selectedAgentId === agent.id;
+                          return (
+                            <button
+                              key={agent.id}
+                              onClick={() => onSelectAgent(agent.id)}
+                              style={{
+                                position: 'relative',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: 4,
+                                width: '100%',
+                                textAlign: 'left',
+                                padding: '8px 10px',
+                                border: 'none',
+                                borderRadius: 6,
+                                cursor: 'pointer',
+                                transition: 'all 100ms ease',
+                                color: isSelected
+                                  ? 'var(--color-text-primary)'
+                                  : 'var(--color-text-secondary)',
+                                background: isSelected
+                                  ? 'var(--color-sidebar-active-bg)'
+                                  : 'transparent',
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!isSelected) {
+                                  e.currentTarget.style.background = 'var(--color-sidebar-hover)';
+                                  e.currentTarget.style.color = 'var(--color-text-primary)';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                if (!isSelected) {
+                                  e.currentTarget.style.background = 'transparent';
+                                  e.currentTarget.style.color = 'var(--color-text-secondary)';
+                                }
+                              }}
+                            >
+                              {isSelected && (
+                                <span
+                                  style={{
+                                    position: 'absolute',
+                                    left: 0,
+                                    top: '50%',
+                                    transform: 'translateY(-50%)',
+                                    width: 3,
+                                    height: 18,
+                                    borderRadius: 2,
+                                    background: 'var(--color-accent-ember)',
+                                  }}
+                                />
+                              )}
+                              <span style={{ fontSize: '0.8125rem', fontWeight: 500 }}>
+                                {agent.name}
+                              </span>
+                              <span
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  fontSize: '0.6875rem',
+                                }}
+                              >
+                                <span className={`status-dot status-dot-${agent.status}`} />
+                                <span style={{ color: 'var(--color-text-tertiary)' }}>
+                                  {agent.status}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>

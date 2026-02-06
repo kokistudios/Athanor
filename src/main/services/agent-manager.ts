@@ -44,6 +44,7 @@ export interface EscalationRequest {
 export class AgentManager extends EventEmitter {
   private activeAgents = new Map<string, AgentProcess>();
   private escalationRequestKeys = new Set<string>();
+  private completedAgentIds = new Set<string>();
 
   constructor(
     private db: Kysely<Database>,
@@ -88,17 +89,32 @@ export class AgentManager extends EventEmitter {
     if (opts.systemPrompt) {
       args.push('--system-prompt', opts.systemPrompt);
     }
-    if (opts.allowedTools) {
-      args.push('--allowedTools', opts.allowedTools.join(','));
-    }
+    // allowedTools handled below alongside MCP tool injection
     if (opts.agents && Object.keys(opts.agents).length > 0) {
       args.push('--agents', JSON.stringify(opts.agents));
     }
     const permissionMode =
       opts.permissionMode || this.config.claude.default_permission_mode || 'default';
     args.push('--permission-mode', permissionMode);
+    if (permissionMode === 'bypassPermissions') {
+      args.push('--dangerously-skip-permissions');
+    }
     if (mcpConfigPath) {
       args.push('--mcp-config', mcpConfigPath);
+      // Ensure MCP tools are explicitly allowed — Claude CLI may not
+      // auto-discover them even with bypassPermissions.
+      const mcpToolPrefix = 'mcp__athanor__';
+      const athanorTools = [
+        `${mcpToolPrefix}athanor_context`,
+        `${mcpToolPrefix}athanor_record`,
+        `${mcpToolPrefix}athanor_decide`,
+        `${mcpToolPrefix}athanor_artifact`,
+        `${mcpToolPrefix}athanor_phase_complete`,
+      ];
+      const merged = [...(opts.allowedTools || []), ...athanorTools];
+      args.push('--allowedTools', merged.join(','));
+    } else if (opts.allowedTools) {
+      args.push('--allowedTools', opts.allowedTools.join(','));
     }
     if (opts.claudeSessionId) {
       args.push('--resume', opts.claudeSessionId);
@@ -337,7 +353,21 @@ export class AgentManager extends EventEmitter {
           })
           .execute();
 
-        this.emit('agent:completed', { agentId, event });
+        // If agent reached a terminal status (e.g. via athanor_phase_complete),
+        // notify immediately and terminate the process.
+        const agent = await this.db
+          .selectFrom('agents')
+          .select('status')
+          .where('id', '=', agentId)
+          .executeTakeFirst();
+
+        if (agent && (agent.status === 'completed' || agent.status === 'failed')) {
+          if (agent.status === 'completed' && !this.completedAgentIds.has(agentId)) {
+            this.completedAgentIds.add(agentId);
+            this.emit('agent:completed', { agentId });
+          }
+          this.terminateProcess(agentId);
+        }
         break;
       }
     }
@@ -370,29 +400,64 @@ export class AgentManager extends EventEmitter {
   }
 
   private async handleAgentExit(agentId: string, code: number | null): Promise<void> {
-    // Check if MCP already set a terminal status
     const agent = await this.db
       .selectFrom('agents')
       .selectAll()
       .where('id', '=', agentId)
       .executeTakeFirst();
 
-    if (agent && agent.status !== 'completed' && agent.status !== 'failed') {
-      const status = code === 0 ? 'completed' : 'failed';
+    if (!agent) return;
+
+    let finalStatus = agent.status;
+
+    // Only update DB if not already terminal
+    if (finalStatus !== 'completed' && finalStatus !== 'failed') {
+      finalStatus = code === 0 ? 'completed' : 'failed';
       await this.db
         .updateTable('agents')
         .set({
-          status,
+          status: finalStatus,
           completed_at: new Date().toISOString(),
         })
         .where('id', '=', agentId)
         .execute();
 
-      this.emit('agent:status-change', { agentId, status });
-      if (status === 'completed') {
-        this.emit('agent:completed', { agentId });
-      }
+      this.emit('agent:status-change', { agentId, status: finalStatus });
     }
+
+    // Notify on completion — workflow engine needs this to advance.
+    // Guard: the result handler may have already emitted this.
+    if (finalStatus === 'completed' && !this.completedAgentIds.has(agentId)) {
+      this.completedAgentIds.add(agentId);
+      this.emit('agent:completed', { agentId });
+    }
+
+    this.completedAgentIds.delete(agentId);
+  }
+
+  private terminateProcess(agentId: string): void {
+    const agentProcess = this.activeAgents.get(agentId);
+    if (!agentProcess) return;
+
+    console.log(
+      `[agent:${agentProcess.name}] Terminating process (agent status is terminal)`,
+    );
+
+    // Close stdin to signal no more input
+    agentProcess.process.stdin?.end();
+
+    // Give the process a moment to exit gracefully, then force-kill
+    setTimeout(async () => {
+      if (!this.activeAgents.has(agentId)) return; // already exited
+      console.warn(`[agent:${agentProcess.name}] Still alive after stdin close; sending SIGTERM`);
+      this.sendSignal(agentProcess, 'SIGTERM');
+
+      const exited = await this.waitForExit(agentProcess.process, 3000);
+      if (!exited && this.activeAgents.has(agentId)) {
+        console.warn(`[agent:${agentProcess.name}] SIGTERM timeout; sending SIGKILL`);
+        this.sendSignal(agentProcess, 'SIGKILL');
+      }
+    }, 2000);
   }
 
   async killAgent(agentId: string): Promise<void> {

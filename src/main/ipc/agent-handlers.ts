@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import { z } from 'zod';
 import type { Database } from '../../shared/types/database';
 import type { ServiceRegistry } from '../services/service-registry';
@@ -14,7 +14,28 @@ export function registerAgentHandlers(
   mainWindow: BrowserWindow,
 ): void {
   registerSecureIpcHandler(mainWindow, 'agent:list', z.tuple([]), async () => {
-    return db.selectFrom('agents').selectAll().orderBy('created_at', 'desc').execute();
+    return db
+      .selectFrom('agents')
+      .innerJoin('sessions', 'sessions.id', 'agents.session_id')
+      .innerJoin('workflows', 'workflows.id', 'sessions.workflow_id')
+      .select([
+        'agents.id',
+        'agents.session_id',
+        'agents.phase_id',
+        'agents.name',
+        'agents.status',
+        'agents.created_at',
+        'sessions.description as session_description',
+        'sessions.status as session_status',
+        'sessions.current_phase as session_current_phase',
+        'sessions.created_at as session_created_at',
+        'workflows.name as workflow_name',
+        sql<number>`(select count(*) from workflow_phases where workflow_phases.workflow_id = sessions.workflow_id)`.as('session_total_phases'),
+      ])
+      .orderBy('sessions.created_at', 'desc')
+      .orderBy('agents.created_at', 'desc')
+      .orderBy(sql`agents.rowid`, 'desc')
+      .execute();
   });
 
   registerSecureIpcHandler(

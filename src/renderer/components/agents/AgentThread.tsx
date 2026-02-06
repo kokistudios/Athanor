@@ -3,6 +3,7 @@ import { ArrowUp, Check, X } from 'lucide-react';
 import { useAgentStream } from '../../hooks/useAgentStream';
 import { MessageBubble } from './MessageBubble';
 import { StreamingText } from './StreamingText';
+import { DecisionPayloadView } from '../approvals/DecisionPayloadView';
 
 interface Message {
   id: string;
@@ -42,12 +43,28 @@ function getApprovalDetail(payload: string | null): string | null {
   return null;
 }
 
+function parseDecisionPayload(
+  payload: string | null,
+): { question?: string; choice?: string; rationale?: string; alternatives?: string[]; tags?: string[]; decisionId?: string } | null {
+  if (!payload) return null;
+  try {
+    const parsed = JSON.parse(payload) as Record<string, unknown>;
+    if (parsed.question || parsed.choice) {
+      return parsed as { question?: string; choice?: string; rationale?: string; alternatives?: string[]; tags?: string[]; decisionId?: string };
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
   const [historicalMessages, setHistoricalMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
+  const [approvalResponses, setApprovalResponses] = useState<Record<string, string>>({});
   const { streamingText, isStreaming } = useAgentStream(agentId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -146,10 +163,20 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
       const user = (await window.athanor.invoke('db:get-user' as never)) as { id: string } | null;
       if (!user) return;
 
+      const response = approvalResponses[approvalId] || undefined;
+
       await window.athanor.invoke('approval:resolve' as never, {
         id: approvalId,
         status,
         userId: user.id,
+        response,
+      });
+
+      // Clean up response state for this approval
+      setApprovalResponses((prev) => {
+        const next = { ...prev };
+        delete next[approvalId];
+        return next;
       });
     } catch (err) {
       console.error('Failed to resolve approval:', err);
@@ -177,22 +204,47 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
             {isStreaming && streamingText && <StreamingText text={streamingText} />}
 
             {pendingApprovals.map((approval) => {
-              const detail = getApprovalDetail(approval.payload);
+              const decisionPayload = approval.type === 'decision' ? parseDecisionPayload(approval.payload) : null;
+              const detail = !decisionPayload ? getApprovalDetail(approval.payload) : null;
               return (
                 <div key={approval.id} className="animate-fade-in my-2">
                   <div className="rounded-xl bg-surface-2 border border-accent-ember/20 p-4">
                     <div className="text-[0.6875rem] text-accent-ember font-medium tracking-wide uppercase mb-2">
                       Approval Required
                     </div>
-                    <div className="text-[0.8125rem] text-text-primary leading-relaxed">
+                    <div className="text-[0.8125rem] text-text-primary leading-relaxed mb-2">
                       {approval.summary}
                     </div>
+
+                    {/* Decision payload structured view */}
+                    {decisionPayload && (
+                      <div className="mt-2 mb-3">
+                        <DecisionPayloadView payload={decisionPayload} compact />
+                      </div>
+                    )}
+
+                    {/* Generic detail */}
                     {detail && (
                       <div className="text-[0.75rem] text-text-tertiary mt-1.5 font-mono">
                         {detail}
                       </div>
                     )}
-                    <div className="flex gap-2 mt-3">
+
+                    {/* Response textarea */}
+                    <textarea
+                      value={approvalResponses[approval.id] || ''}
+                      onChange={(e) =>
+                        setApprovalResponses((prev) => ({
+                          ...prev,
+                          [approval.id]: e.target.value,
+                        }))
+                      }
+                      placeholder="Optional response..."
+                      rows={2}
+                      className="input-base w-full mt-2 mb-2 min-h-[48px] resize-y font-mono text-[0.75rem] leading-relaxed"
+                    />
+
+                    <div className="flex gap-2 mt-1">
                       <button
                         onClick={() => void handleResolveApproval(approval.id, 'approved')}
                         disabled={resolvingApprovalId === approval.id}

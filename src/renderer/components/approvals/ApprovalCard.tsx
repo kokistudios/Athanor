@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { MarkdownPreview } from '../shared/MarkdownPreview';
 import { TransparentMarkdownEditor } from '../shared/TransparentMarkdownEditor';
+import { DecisionPayloadView } from './DecisionPayloadView';
 import { Check, X, ChevronDown, ChevronRight, Clock } from 'lucide-react';
 
 interface Approval {
@@ -28,7 +29,8 @@ const typeBadge: Record<string, string> = {
 
 export function ApprovalCard({ approval, onResolve }: ApprovalCardProps): React.ReactElement {
   const [response, setResponse] = useState('');
-  const [expanded, setExpanded] = useState(false);
+  const isDecision = approval.type === 'decision';
+  const [expanded, setExpanded] = useState(isDecision);
 
   let payload: Record<string, unknown> | null = null;
   if (approval.payload) {
@@ -66,21 +68,31 @@ export function ApprovalCard({ approval, onResolve }: ApprovalCardProps): React.
           />
         </div>
 
-        {/* Details toggle */}
-        {payload && (
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="btn-ghost flex items-center gap-1.5 !px-0 !py-0 mb-2 text-[0.75rem]"
-          >
-            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            {expanded ? 'Hide details' : 'Show details'}
-          </button>
-        )}
+        {/* Decision structured view OR generic details toggle */}
+        {isDecision && payload ? (
+          <div className="mb-3">
+            <DecisionPayloadView
+              payload={payload as { question?: string; choice?: string; rationale?: string; alternatives?: string[]; tags?: string[]; decisionId?: string }}
+            />
+          </div>
+        ) : (
+          <>
+            {payload && (
+              <button
+                onClick={() => setExpanded(!expanded)}
+                className="btn-ghost flex items-center gap-1.5 !px-0 !py-0 mb-2 text-[0.75rem]"
+              >
+                {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                {expanded ? 'Hide details' : 'Show details'}
+              </button>
+            )}
 
-        {expanded && payload && (
-          <pre className="p-3 bg-code-bg border border-code-border rounded-md text-[0.75rem] text-text-secondary overflow-auto max-h-[200px] mb-3 font-mono">
-            {JSON.stringify(payload, null, 2)}
-          </pre>
+            {expanded && payload && (
+              <pre className="p-3 bg-code-bg border border-code-border rounded-md text-[0.75rem] text-text-secondary overflow-auto max-h-[200px] mb-3 font-mono">
+                {JSON.stringify(payload, null, 2)}
+              </pre>
+            )}
+          </>
         )}
 
         {/* Response editor */}

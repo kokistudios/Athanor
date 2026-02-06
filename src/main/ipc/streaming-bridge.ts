@@ -34,4 +34,13 @@ export function setupStreamingBridge(services: ServiceRegistry, mainWindow: Brow
   services.approvalRouter.on('approval:resolved', (data: unknown) => {
     mainWindow.webContents.send('approval:resolved', data);
   });
+
+  // Forward session status events to renderer
+  services.workflowEngine.on('session:status-change', (data: unknown) => {
+    mainWindow.webContents.send('session:status-change', data);
+  });
+
+  services.workflowEngine.on('phase:advanced', (data: unknown) => {
+    mainWindow.webContents.send('phase:advanced', data);
+  });
 }

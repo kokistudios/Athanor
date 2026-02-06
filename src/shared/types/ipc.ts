@@ -41,4 +41,5 @@ export type PushChannel =
   | 'agent:completed'
   | 'approval:new'
   | 'approval:resolved'
-  | 'session:status-change';
+  | 'session:status-change'
+  | 'phase:advanced';

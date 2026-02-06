@@ -3,6 +3,7 @@ import * as crypto from 'crypto';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../shared/types/database';
 import type { ApprovalType, ApprovalStatus } from '../../shared/types/domain';
+import type { McpBridge } from './mcp-bridge';
 
 export interface CreateApprovalOptions {
   sessionId: string;
@@ -20,12 +21,21 @@ export interface ResolveApprovalOptions {
 }
 
 export class ApprovalRouter extends EventEmitter {
+  private bridge: McpBridge | null = null;
+
   constructor(private db: Kysely<Database>) {
     super();
   }
 
+  registerBridge(bridge: McpBridge): void {
+    this.bridge = bridge;
+  }
+
   async createApproval(opts: CreateApprovalOptions): Promise<string> {
     const id = crypto.randomUUID();
+
+    // Register with bridge before DB insert to prevent double-emission
+    this.bridge?.markKnown(id);
 
     await this.db
       .insertInto('approvals')

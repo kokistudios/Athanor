@@ -139,6 +139,10 @@ app.on('ready', async () => {
   if (services && mainWindow) {
     const { registerIpcHandlers } = await import('./ipc/handlers');
     registerIpcHandlers(db, services, mainWindow);
+
+    // Start MCP bridge polling and recover orphaned sessions
+    await services.mcpBridge.start();
+    await services.workflowEngine.recoverSessions();
   }
 });
 
@@ -155,6 +159,9 @@ app.on('activate', () => {
 });
 
 app.on('quit', async () => {
+  if (services) {
+    services.mcpBridge.stop();
+  }
   if (db) {
     await db.destroy();
   }
