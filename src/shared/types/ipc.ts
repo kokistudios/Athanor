@@ -28,6 +28,7 @@ export type IpcChannel =
   | 'agent:send-input'
   | 'agent:kill'
   | 'approval:list-pending'
+  | 'approval:list-pending-grouped'
   | 'approval:resolve'
   | 'decision:list'
   | 'decision:list-grouped'

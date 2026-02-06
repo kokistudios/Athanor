@@ -47,6 +47,34 @@ export function createServices(db: Kysely<Database>, config: AthanorConfig): Ser
     }
   });
 
+  agentManager.on('agent:turn-ended', async (event: { agentId: string; sessionId: string }) => {
+    try {
+      await approvalRouter.createApproval({
+        sessionId: event.sessionId,
+        agentId: event.agentId,
+        type: 'agent_idle',
+        summary: 'Agent finished its turn — waiting for your input or a nudge to complete.',
+      });
+      await workflowEngine.setSessionStatus(event.sessionId, 'waiting_approval');
+    } catch (err) {
+      console.error('Error creating agent_idle approval:', err);
+    }
+  });
+
+  // When a needs_input approval is created, set session to waiting_approval
+  approvalRouter.on(
+    'approval:new',
+    async (approval: { session_id: string; type: string }) => {
+      if (approval.type === 'needs_input' || approval.type === 'agent_idle') {
+        try {
+          await workflowEngine.setSessionStatus(approval.session_id, 'waiting_approval');
+        } catch (err) {
+          console.error('Error setting session to waiting_approval for needs_input:', err);
+        }
+      }
+    },
+  );
+
   // Wire approval resolution to workflow engine
   approvalRouter.on(
     'approval:resolved',
@@ -112,6 +140,33 @@ export function createServices(db: Kysely<Database>, config: AthanorConfig): Ser
           }
         } catch (err) {
           console.error('Error handling decision resolution:', err);
+        }
+        return;
+      }
+
+      if (approval.type === 'needs_input' || approval.type === 'agent_idle') {
+        try {
+          if (approval.status === 'approved' && approval.agent_id) {
+            // Send the user's response text to the waiting agent.
+            // A non-empty string is required — the Claude API rejects empty text blocks.
+            const inputText = approval.response?.trim() || 'Continue.';
+            await agentManager.sendInput(approval.agent_id, inputText);
+
+            // Update agent status back to running
+            await db
+              .updateTable('agents')
+              .set({ status: 'running' })
+              .where('id', '=', approval.agent_id)
+              .execute();
+
+            // Set session back to active
+            await workflowEngine.setSessionStatus(approval.session_id, 'active');
+          } else if (approval.status === 'rejected' && approval.agent_id) {
+            // Kill the agent — session will transition through handleAgentExit
+            await agentManager.killAgent(approval.agent_id);
+          }
+        } catch (err) {
+          console.error('Error handling needs_input/agent_idle resolution:', err);
         }
       }
     },

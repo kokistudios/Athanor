@@ -5,6 +5,9 @@
   "description": "My Electron application description",
   "main": ".webpack/main",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "start": "electron-forge start",
     "package": "electron-forge package",

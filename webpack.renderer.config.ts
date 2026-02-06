@@ -1,28 +1,30 @@
 import type { Configuration } from 'webpack';
 
-import { rules } from './webpack.rules';
+import { rendererRules } from './webpack.rules';
 import { plugins } from './webpack.plugins';
 
-rules.push({
-  test: /\.(png|jpe?g|gif|svg|ico)$/i,
-  type: 'asset/resource',
-});
-
-rules.push({
-  test: /\.css$/,
-  use: [
-    { loader: 'style-loader' },
-    { loader: 'css-loader' },
-    {
-      loader: 'postcss-loader',
-      options: {
-        postcssOptions: {
-          plugins: ['@tailwindcss/postcss'],
+const rules = [
+  ...rendererRules,
+  {
+    test: /\.(png|jpe?g|gif|svg|ico)$/i,
+    type: 'asset/resource' as const,
+  },
+  {
+    test: /\.css$/,
+    use: [
+      { loader: 'style-loader' },
+      { loader: 'css-loader' },
+      {
+        loader: 'postcss-loader',
+        options: {
+          postcssOptions: {
+            plugins: ['@tailwindcss/postcss'],
+          },
         },
       },
-    },
-  ],
-});
+    ],
+  },
+];
 
 export const rendererConfig: Configuration = {
   module: {

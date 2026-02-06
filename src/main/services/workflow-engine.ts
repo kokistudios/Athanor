@@ -42,7 +42,7 @@ export class WorkflowEngine extends EventEmitter {
 
   // ── Helpers ──────────────────────────────────────────────────
 
-  private async setSessionStatus(sessionId: string, status: string, extra?: Record<string, unknown>): Promise<void> {
+  async setSessionStatus(sessionId: string, status: string, extra?: Record<string, unknown>): Promise<void> {
     await this.db
       .updateTable('sessions')
       .set({ status, ...extra } as Record<string, unknown>)

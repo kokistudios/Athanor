@@ -1,9 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, X } from 'lucide-react';
+import { ArrowUp, Check, X, OctagonX, PenLine } from 'lucide-react';
 import { useAgentStream } from '../../hooks/useAgentStream';
 import { MessageBubble } from './MessageBubble';
 import { StreamingText } from './StreamingText';
 import { DecisionPayloadView } from '../approvals/DecisionPayloadView';
+
+const PHASE_TERMINATE_TEXT = [
+  'DIRECTIVE: Terminate this phase now.',
+  '',
+  'You must immediately:',
+  '1. Write your phase artifact via athanor_artifact (if not already written)',
+  '2. Call athanor_phase_complete with status "complete" and a summary of what you accomplished',
+  '',
+  'Do not start any new work. Wrap up and complete the phase.',
+].join('\n');
 
 interface Message {
   id: string;
@@ -65,6 +75,7 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const [approvalResponses, setApprovalResponses] = useState<Record<string, string>>({});
+  const [showCustomEditor, setShowCustomEditor] = useState<Record<string, boolean>>({});
   const { streamingText, isStreaming } = useAgentStream(agentId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -157,13 +168,13 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
     }
   };
 
-  const handleResolveApproval = async (approvalId: string, status: 'approved' | 'rejected') => {
+  const handleResolveApproval = async (approvalId: string, status: 'approved' | 'rejected', responseOverride?: string) => {
     setResolvingApprovalId(approvalId);
     try {
       const user = (await window.athanor.invoke('db:get-user' as never)) as { id: string } | null;
       if (!user) return;
 
-      const response = approvalResponses[approvalId] || undefined;
+      const response = responseOverride ?? (approvalResponses[approvalId] || undefined);
 
       await window.athanor.invoke('approval:resolve' as never, {
         id: approvalId,
@@ -174,6 +185,12 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
 
       // Clean up response state for this approval
       setApprovalResponses((prev) => {
+        const next = { ...prev };
+        delete next[approvalId];
+        return next;
+      });
+      // Clean up custom editor state
+      setShowCustomEditor((prev) => {
         const next = { ...prev };
         delete next[approvalId];
         return next;
@@ -206,11 +223,14 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
             {pendingApprovals.map((approval) => {
               const decisionPayload = approval.type === 'decision' ? parseDecisionPayload(approval.payload) : null;
               const detail = !decisionPayload ? getApprovalDetail(approval.payload) : null;
+              const isContinuation = approval.type === 'needs_input' || approval.type === 'agent_idle';
+              const customEditorOpen = showCustomEditor[approval.id] ?? false;
+              const customText = approvalResponses[approval.id] || '';
               return (
                 <div key={approval.id} className="animate-fade-in my-2">
                   <div className="rounded-xl bg-surface-2 border border-accent-ember/20 p-4">
                     <div className="text-[0.6875rem] text-accent-ember font-medium tracking-wide uppercase mb-2">
-                      Approval Required
+                      {isContinuation ? 'Action Required' : 'Approval Required'}
                     </div>
                     <div className="text-[0.8125rem] text-text-primary leading-relaxed mb-2">
                       {approval.summary}
@@ -230,38 +250,121 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
                       </div>
                     )}
 
-                    {/* Response textarea */}
-                    <textarea
-                      value={approvalResponses[approval.id] || ''}
-                      onChange={(e) =>
-                        setApprovalResponses((prev) => ({
-                          ...prev,
-                          [approval.id]: e.target.value,
-                        }))
-                      }
-                      placeholder="Optional response..."
-                      rows={2}
-                      className="input-base w-full mt-2 mb-2 min-h-[48px] resize-y font-mono text-[0.75rem] leading-relaxed"
-                    />
-
-                    <div className="flex gap-2 mt-1">
-                      <button
-                        onClick={() => void handleResolveApproval(approval.id, 'approved')}
-                        disabled={resolvingApprovalId === approval.id}
-                        className="btn-primary flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
-                      >
-                        <Check size={12} />
-                        Approve
-                      </button>
-                      <button
-                        onClick={() => void handleResolveApproval(approval.id, 'rejected')}
-                        disabled={resolvingApprovalId === approval.id}
-                        className="btn-ghost flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem] !text-status-failed !border-status-failed/30 !border"
-                      >
-                        <X size={12} />
-                        Reject
-                      </button>
-                    </div>
+                    {isContinuation ? (
+                      <>
+                        {customEditorOpen && (
+                          <textarea
+                            value={customText}
+                            onChange={(e) =>
+                              setApprovalResponses((prev) => ({
+                                ...prev,
+                                [approval.id]: e.target.value,
+                              }))
+                            }
+                            onKeyDown={(e) => {
+                              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && customText.trim()) {
+                                e.preventDefault();
+                                void handleResolveApproval(approval.id, 'approved', customText);
+                              }
+                            }}
+                            placeholder="Your response..."
+                            rows={2}
+                            className="input-base w-full mt-2 mb-2 min-h-[48px] resize-y font-mono text-[0.75rem] leading-relaxed"
+                            autoFocus
+                          />
+                        )}
+                        <div className="flex gap-2 mt-1">
+                          <button
+                            onClick={() => void handleResolveApproval(approval.id, 'approved', PHASE_TERMINATE_TEXT)}
+                            disabled={resolvingApprovalId === approval.id}
+                            className="btn-danger flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
+                          >
+                            <OctagonX size={12} />
+                            Phase Terminate
+                          </button>
+                          <button
+                            onClick={() => void handleResolveApproval(approval.id, 'approved', 'Continue.')}
+                            disabled={resolvingApprovalId === approval.id}
+                            className="btn-primary flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
+                          >
+                            <Check size={12} />
+                            Affirm
+                          </button>
+                          {customEditorOpen ? (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setShowCustomEditor((prev) => ({ ...prev, [approval.id]: false }));
+                                  setApprovalResponses((prev) => {
+                                    const next = { ...prev };
+                                    delete next[approval.id];
+                                    return next;
+                                  });
+                                }}
+                                disabled={resolvingApprovalId === approval.id}
+                                className="btn-ghost flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
+                              >
+                                <X size={12} />
+                                Cancel
+                              </button>
+                              {customText.trim() && (
+                                <button
+                                  onClick={() => void handleResolveApproval(approval.id, 'approved', customText)}
+                                  disabled={resolvingApprovalId === approval.id}
+                                  className="btn-primary flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
+                                >
+                                  <ArrowUp size={12} />
+                                  Send
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => setShowCustomEditor((prev) => ({ ...prev, [approval.id]: true }))}
+                              disabled={resolvingApprovalId === approval.id}
+                              className="btn-secondary flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
+                            >
+                              <PenLine size={12} />
+                              Custom
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        {/* Response textarea for standard approvals */}
+                        <textarea
+                          value={approvalResponses[approval.id] || ''}
+                          onChange={(e) =>
+                            setApprovalResponses((prev) => ({
+                              ...prev,
+                              [approval.id]: e.target.value,
+                            }))
+                          }
+                          placeholder="Optional response..."
+                          rows={2}
+                          className="input-base w-full mt-2 mb-2 min-h-[48px] resize-y font-mono text-[0.75rem] leading-relaxed"
+                        />
+                        <div className="flex gap-2 mt-1">
+                          <button
+                            onClick={() => void handleResolveApproval(approval.id, 'approved')}
+                            disabled={resolvingApprovalId === approval.id}
+                            className="btn-primary flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
+                          >
+                            <Check size={12} />
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => void handleResolveApproval(approval.id, 'rejected')}
+                            disabled={resolvingApprovalId === approval.id}
+                            className="btn-ghost flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem] !text-status-failed !border-status-failed/30 !border"
+                          >
+                            <X size={12} />
+                            Reject
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               );

@@ -9,7 +9,7 @@ import { useTheme } from './hooks/useTheme';
 export function App(): React.ReactElement {
   const [view, setView] = useState<View>({ kind: 'agents' });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const { approvals } = useApprovals();
+  const { totalCount: approvalCount } = useApprovals();
   const { theme, toggleTheme } = useTheme();
   const { toasts, addToast, dismissToast } = useToast();
 
@@ -71,7 +71,7 @@ export function App(): React.ReactElement {
       <Sidebar
         currentView={view.kind}
         onNavigate={handleNavigate}
-        approvalCount={approvals.length}
+        approvalCount={approvalCount}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((prev) => !prev)}
         theme={theme}

@@ -154,9 +154,10 @@ function ArtifactCard({
 
 export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.ReactElement {
   const [session, setSession] = useState<SessionData | null>(null);
-  const { approvals, resolve } = useApprovals();
+  const { groups: approvalGroups, resolve } = useApprovals();
 
-  const sessionApprovals = approvals.filter((a) => a.session_id === sessionId);
+  const sessionApprovals =
+    approvalGroups.find((g) => g.sessionId === sessionId)?.approvals || [];
 
   const reloadSession = useCallback(async () => {
     try {

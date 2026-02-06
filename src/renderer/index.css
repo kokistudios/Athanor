@@ -950,6 +950,12 @@ button:disabled {
   border: 1px solid rgba(196, 92, 92, 0.15);
 }
 
+.badge-violet {
+  background: rgba(139, 92, 196, 0.12);
+  color: #a78bda;
+  border: 1px solid rgba(139, 92, 196, 0.15);
+}
+
 .badge-neutral {
   background: var(--color-surface-3);
   color: var(--color-text-secondary);

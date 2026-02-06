@@ -79,7 +79,7 @@ server.tool(
   'Signal that the current phase is done',
   phaseCompleteSchema.shape,
   async (params) => {
-    const result = await athanorPhaseComplete(db, agentId, params);
+    const result = await athanorPhaseComplete(db, agentId, sessionId, params);
     return { content: [{ type: 'text', text: result }] };
   },
 );

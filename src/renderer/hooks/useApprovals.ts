@@ -14,20 +14,35 @@ interface Approval {
   resolved_at: string | null;
 }
 
-export function useApprovals(): {
+export interface ApprovalSessionGroup {
+  sessionId: string;
+  description: string | null;
+  status: string;
+  createdAt: string;
   approvals: Approval[];
+}
+
+interface GroupedResponse {
+  sessions: ApprovalSessionGroup[];
+}
+
+export function useApprovals(): {
+  groups: ApprovalSessionGroup[];
+  totalCount: number;
   loading: boolean;
   refetch: () => void;
   resolve: (id: string, status: 'approved' | 'rejected', response?: string) => Promise<void>;
 } {
-  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [groups, setGroups] = useState<ApprovalSessionGroup[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetch = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await window.athanor.invoke('approval:list-pending' as never);
-      setApprovals(result as Approval[]);
+      const result = await window.athanor.invoke(
+        'approval:list-pending-grouped' as never,
+      );
+      setGroups((result as GroupedResponse).sessions);
     } catch (err) {
       console.error('Failed to fetch approvals:', err);
     } finally {
@@ -67,5 +82,7 @@ export function useApprovals(): {
     [],
   );
 
-  return { approvals, loading, refetch: fetch, resolve };
+  const totalCount = groups.reduce((sum, g) => sum + g.approvals.length, 0);
+
+  return { groups, totalCount, loading, refetch: fetch, resolve };
 }

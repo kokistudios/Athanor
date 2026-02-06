@@ -43,14 +43,13 @@ export function SessionDashboard({
   onSelectSession,
 }: SessionDashboardProps): React.ReactElement {
   const { sessions, loading, refetch } = useSessions();
-  const { approvals } = useApprovals();
+  const { groups: approvalGroups } = useApprovals();
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; label: string } | null>(null);
 
-  // Build per-session approval counts
+  // Build per-session approval counts from grouped data
   const approvalCountBySession: Record<string, number> = {};
-  for (const approval of approvals) {
-    approvalCountBySession[approval.session_id] =
-      (approvalCountBySession[approval.session_id] || 0) + 1;
+  for (const group of approvalGroups) {
+    approvalCountBySession[group.sessionId] = group.approvals.length;
   }
 
   if (selectedSessionId) {

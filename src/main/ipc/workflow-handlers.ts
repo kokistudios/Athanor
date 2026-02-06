@@ -158,25 +158,70 @@ export function registerWorkflowHandlers(
       await db.updateTable('workflows').set(updates).where('id', '=', opts.id).execute();
 
       if (opts.phases) {
-        // Delete existing phases and recreate
-        await db.deleteFrom('workflow_phases').where('workflow_id', '=', opts.id).execute();
+        // Merge phases: update existing, insert new, delete removed (if unreferenced).
+        // A naive delete-all fails when agents/artifacts reference existing phases.
+        const existingPhases = await db
+          .selectFrom('workflow_phases')
+          .select('id')
+          .where('workflow_id', '=', opts.id)
+          .execute();
+        const existingIds = new Set(existingPhases.map((p) => p.id));
+        const incomingIds = new Set(
+          opts.phases.map((p) => p.id).filter((id): id is string => !!id),
+        );
 
+        // Delete phases that were removed and have no child references
+        for (const existing of existingPhases) {
+          if (!incomingIds.has(existing.id)) {
+            const hasChildren = await db
+              .selectFrom('agents')
+              .select('id')
+              .where('phase_id', '=', existing.id)
+              .limit(1)
+              .executeTakeFirst();
+            if (!hasChildren) {
+              const hasArtifacts = await db
+                .selectFrom('artifacts')
+                .select('id')
+                .where('phase_id', '=', existing.id)
+                .limit(1)
+                .executeTakeFirst();
+              if (!hasArtifacts) {
+                await db.deleteFrom('workflow_phases').where('id', '=', existing.id).execute();
+              }
+            }
+          }
+        }
+
+        // Upsert phases
         for (let i = 0; i < opts.phases.length; i++) {
           const phase = opts.phases[i];
-          await db
-            .insertInto('workflow_phases')
-            .values({
-              id: phase.id || crypto.randomUUID(),
-              workflow_id: opts.id,
-              ordinal: i,
-              name: phase.name,
-              prompt_template: phase.prompt_template,
-              allowed_tools: phase.allowed_tools ? JSON.stringify(phase.allowed_tools) : null,
-              agents: phase.agents ? JSON.stringify(phase.agents) : null,
-              approval: phase.approval || 'none',
-              config: phase.config ? JSON.stringify(phase.config) : null,
-            })
-            .execute();
+          const phaseValues = {
+            ordinal: i,
+            name: phase.name,
+            prompt_template: phase.prompt_template,
+            allowed_tools: phase.allowed_tools ? JSON.stringify(phase.allowed_tools) : null,
+            agents: phase.agents ? JSON.stringify(phase.agents) : null,
+            approval: phase.approval || 'none',
+            config: phase.config ? JSON.stringify(phase.config) : null,
+          };
+
+          if (phase.id && existingIds.has(phase.id)) {
+            await db
+              .updateTable('workflow_phases')
+              .set(phaseValues)
+              .where('id', '=', phase.id)
+              .execute();
+          } else {
+            await db
+              .insertInto('workflow_phases')
+              .values({
+                id: phase.id || crypto.randomUUID(),
+                workflow_id: opts.id,
+                ...phaseValues,
+              })
+              .execute();
+          }
         }
       }
 
@@ -280,15 +325,44 @@ export function registerWorkflowHandlers(
         .filter((a) => a.sessionId === sessionId);
       await Promise.all(activeAgents.map((agent) => services.agentManager.killAgent(agent.id)));
 
-      // Delete in dependency order (no CASCADE on these FKs)
-      // 1. messages -> agents
-      const agentIds = await db
+      // Collect agent info before deleting rows — we need IDs and worktree paths
+      const agentRows = await db
         .selectFrom('agents')
-        .select('id')
+        .select(['id', 'worktree_path'])
         .where('session_id', '=', sessionId)
         .execute();
-      const ids = agentIds.map((a) => a.id);
+      const ids = agentRows.map((a) => a.id);
+      const worktreePaths = agentRows
+        .map((a) => a.worktree_path)
+        .filter((p): p is string => !!p);
 
+      // Look up the repo path for git worktree removal
+      let repoPath: string | null = null;
+      if (worktreePaths.length > 0) {
+        const session = await db
+          .selectFrom('sessions')
+          .select('workspace_id')
+          .where('id', '=', sessionId)
+          .executeTakeFirst();
+        if (session) {
+          const workspace = await db
+            .selectFrom('workspaces')
+            .select('repo_id')
+            .where('id', '=', session.workspace_id)
+            .executeTakeFirst();
+          if (workspace) {
+            const repo = await db
+              .selectFrom('repos')
+              .select('local_path')
+              .where('id', '=', workspace.repo_id)
+              .executeTakeFirst();
+            repoPath = repo?.local_path ?? null;
+          }
+        }
+      }
+
+      // Delete in dependency order (no CASCADE on these FKs)
+      // 1. messages -> agents
       if (ids.length > 0) {
         await db.deleteFrom('messages').where('agent_id', 'in', ids).execute();
       }
@@ -306,6 +380,17 @@ export function registerWorkflowHandlers(
         await services.contentStore.deleteTree(`sessions/${agentId}`);
       }
       await services.contentStore.deleteTree(`sessions/${sessionId}`);
+
+      // 6. Remove git worktrees
+      for (const wtPath of worktreePaths) {
+        try {
+          if (repoPath) {
+            await services.worktreeManager.removeWorktree(repoPath, wtPath);
+          }
+        } catch (err) {
+          console.warn(`Failed to remove worktree ${wtPath}:`, err);
+        }
+      }
 
       return { success: true };
     },

@@ -84,6 +84,52 @@ export function registerApprovalHandlers(
 
   registerSecureIpcHandler(
     mainWindow,
+    'approval:list-pending-grouped',
+    z.tuple([]),
+    async () => {
+      const approvals = await services.approvalRouter.getPendingApprovals();
+
+      if (approvals.length === 0) {
+        return { sessions: [] };
+      }
+
+      // Group approvals by session_id
+      const approvalsBySession = new Map<string, typeof approvals>();
+      for (const a of approvals) {
+        const list = approvalsBySession.get(a.session_id) || [];
+        list.push(a);
+        approvalsBySession.set(a.session_id, list);
+      }
+
+      const sessionIds = [...approvalsBySession.keys()];
+
+      // Fetch session metadata
+      const sessionMeta = await db
+        .selectFrom('sessions')
+        .select(['id', 'description', 'status', 'created_at'])
+        .where('id', 'in', sessionIds)
+        .execute();
+
+      const sessionMetaMap = new Map(sessionMeta.map((s) => [s.id, s]));
+
+      // Build result ordered by earliest pending approval per session
+      const sessions = sessionIds.map((sid) => {
+        const meta = sessionMetaMap.get(sid);
+        return {
+          sessionId: sid,
+          description: meta?.description ?? null,
+          status: meta?.status ?? 'unknown',
+          createdAt: meta?.created_at ?? '',
+          approvals: approvalsBySession.get(sid) || [],
+        };
+      });
+
+      return { sessions };
+    },
+  );
+
+  registerSecureIpcHandler(
+    mainWindow,
     'approval:resolve',
     resolveApprovalArgsSchema,
     async (_event, opts) => {

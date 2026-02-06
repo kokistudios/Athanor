@@ -4,7 +4,7 @@ export type SessionStatus = (typeof SESSION_STATUSES)[number];
 export const AGENT_STATUSES = ['spawning', 'running', 'waiting', 'completed', 'failed'] as const;
 export type AgentStatus = (typeof AGENT_STATUSES)[number];
 
-export const APPROVAL_TYPES = ['phase_gate', 'decision', 'merge', 'escalation'] as const;
+export const APPROVAL_TYPES = ['phase_gate', 'decision', 'merge', 'escalation', 'needs_input', 'agent_idle'] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
 export const APPROVAL_STATUSES = ['pending', 'approved', 'rejected'] as const;
