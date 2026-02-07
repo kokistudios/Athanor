@@ -8,8 +8,10 @@ interface Session {
   status: string;
   current_phase: number | null;
   context: string | null;
+  description: string | null;
   created_at: string;
   completed_at: string | null;
+  workflow_name: string | null;
 }
 
 export function useSessions(): {

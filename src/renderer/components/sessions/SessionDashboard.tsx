@@ -1,13 +1,12 @@
-import React, { useState } from 'react';
+import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useSessions } from '../../hooks/useSessions';
 import { useApprovals } from '../../hooks/useApprovals';
 import { SessionDetail } from './SessionDetail';
 import { LaunchSession } from './LaunchSession';
-import { Trash2, Folders, Clock, Layers, ChevronRight, ShieldAlert } from 'lucide-react';
+import { Folders, Clock, Layers, ChevronRight, ShieldAlert, Workflow } from 'lucide-react';
 import { secureMarkdownComponents } from '../shared/markdown-security';
-import { ConfirmDialog } from '../shared/ConfirmDialog';
 
 const statusBadgeClass: Record<string, string> = {
   active: 'badge-green',
@@ -44,7 +43,6 @@ export function SessionDashboard({
 }: SessionDashboardProps): React.ReactElement {
   const { sessions, loading, refetch } = useSessions();
   const { groups: approvalGroups } = useApprovals();
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; label: string } | null>(null);
 
   // Build per-session approval counts from grouped data
   const approvalCountBySession: Record<string, number> = {};
@@ -53,7 +51,16 @@ export function SessionDashboard({
   }
 
   if (selectedSessionId) {
-    return <SessionDetail sessionId={selectedSessionId} onBack={() => onSelectSession('')} />;
+    return (
+      <SessionDetail
+        sessionId={selectedSessionId}
+        onBack={() => onSelectSession('')}
+        onDeleted={() => {
+          onSelectSession('');
+          refetch();
+        }}
+      />
+    );
   }
 
   return (
@@ -67,43 +74,31 @@ export function SessionDashboard({
         <div className="content-area">
           <LaunchSession onLaunched={refetch} />
 
-          {loading && <div className="text-text-tertiary text-[0.8125rem] mt-4">Loading...</div>}
+          {loading && (
+            <div className="text-text-tertiary text-[0.8125rem] mt-4">Loading...</div>
+          )}
 
-          <div className="stagger-children">
+          <div className="flex flex-col gap-4 stagger-children">
             {sessions.map((session) => {
               const approvalCount = approvalCountBySession[session.id] || 0;
+              const title = session.description || `Session ${session.id.slice(0, 8)}`;
+
               return (
-                <div
+                <button
                   key={session.id}
-                  className={`card card-accent-left card-accent-${session.status === 'waiting_approval' ? 'waiting' : session.status} mb-3 group`}
+                  onClick={() => onSelectSession(session.id)}
+                  className={`card card-accent-left card-accent-${session.status === 'waiting_approval' ? 'waiting' : session.status} p-6 pl-7 group relative z-[1] w-full border-none bg-transparent text-left cursor-pointer text-text-primary`}
                 >
-                  <button
-                    onClick={() => onSelectSession(session.id)}
-                    className="relative z-[1] flex-1 w-full p-6 pl-7 border-none bg-transparent text-left cursor-pointer text-text-primary"
-                  >
-                    {/* Header: status + title + badges */}
-                    <div className="flex items-center gap-3 mb-2">
+                  <div className="relative z-[1]">
+                    {/* Row 1: Title + Status */}
+                    <div className="flex items-center gap-3 mb-3">
                       <span className={`status-dot status-dot-${session.status}`} />
-                      <span className="card-title flex-1 min-w-0 truncate">
-                        Session {session.id.slice(0, 8)}
-                      </span>
+                      <span className="card-title flex-1 min-w-0 truncate">{title}</span>
                       <span
                         className={`badge ${statusBadgeClass[session.status] || 'badge-neutral'}`}
                       >
                         {statusLabel[session.status] || session.status}
                       </span>
-                      {approvalCount > 0 && (
-                        <span className="badge badge-red flex items-center gap-1">
-                          <ShieldAlert size={10} strokeWidth={2} />
-                          {approvalCount}
-                        </span>
-                      )}
-                      {session.current_phase !== null && (
-                        <span className="badge badge-ember flex items-center gap-1">
-                          <Layers size={10} strokeWidth={2} />
-                          Phase {session.current_phase + 1}
-                        </span>
-                      )}
                       <ChevronRight
                         size={14}
                         strokeWidth={2}
@@ -113,7 +108,7 @@ export function SessionDashboard({
 
                     {/* Context preview */}
                     {session.context && (
-                      <div className="card-context-preview mb-3">
+                      <div className="card-context-preview mb-3 ml-5">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
                           components={secureMarkdownComponents}
@@ -123,32 +118,36 @@ export function SessionDashboard({
                       </div>
                     )}
 
-                    {/* Footer: meta info */}
-                    <div className="card-meta">
-                      <span className="flex items-center gap-1.5">
-                        <Clock size={10} strokeWidth={2} />
+                    {/* Row 2: Meta chips + timestamp */}
+                    <div className="flex items-center gap-2.5 ml-5">
+                      {session.workflow_name && (
+                        <span className="flex items-center gap-1.5 text-[0.6875rem] text-text-tertiary">
+                          <Workflow size={10} strokeWidth={2} />
+                          <span className="truncate max-w-[140px]">
+                            {session.workflow_name}
+                          </span>
+                        </span>
+                      )}
+                      {session.current_phase !== null && (
+                        <span className="badge badge-ember flex items-center gap-1">
+                          <Layers size={9} strokeWidth={2} />
+                          Phase {session.current_phase + 1}
+                        </span>
+                      )}
+                      {approvalCount > 0 && (
+                        <span className="badge badge-red flex items-center gap-1">
+                          <ShieldAlert size={9} strokeWidth={2} />
+                          {approvalCount}
+                        </span>
+                      )}
+                      <span className="flex-1" />
+                      <span className="flex items-center gap-1.5 text-[0.6875rem] text-text-tertiary font-mono">
+                        <Clock size={9} strokeWidth={2} />
                         {new Date(session.created_at).toLocaleString()}
                       </span>
-                      <span className="text-text-tertiary opacity-40">|</span>
-                      <span className="font-mono text-[0.625rem] text-text-tertiary opacity-50">
-                        {session.id.slice(0, 12)}
-                      </span>
                     </div>
-                  </button>
-
-                  {/* Delete action — positioned absolutely */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleteTarget({ id: session.id, label: session.id.slice(0, 8) });
-                    }}
-                    className="btn-icon !w-7 !h-7 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-                    title="Delete session"
-                    style={{ position: 'absolute', top: 12, right: 12, zIndex: 2 }}
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
+                  </div>
+                </button>
               );
             })}
           </div>
@@ -166,20 +165,6 @@ export function SessionDashboard({
           )}
         </div>
       </div>
-
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        title="Delete Session"
-        description={`Session ${deleteTarget?.label} will be permanently deleted.`}
-        warning="All agents, messages, artifacts, decisions, and approvals in this session will be lost."
-        onConfirm={async () => {
-          if (!deleteTarget) return;
-          await window.athanor.invoke('session:delete' as never, deleteTarget.id);
-          setDeleteTarget(null);
-          refetch();
-        }}
-        onCancel={() => setDeleteTarget(null)}
-      />
     </div>
   );
 }

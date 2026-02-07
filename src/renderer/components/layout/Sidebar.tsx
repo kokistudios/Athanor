@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useRef } from 'react';
 import {
   UsersRound,
   Folders,
@@ -29,6 +29,7 @@ interface SidebarProps {
   currentView: ViewKind;
   onNavigate: (view: ViewKind) => void;
   approvalCount: number;
+  waitingAgentCount: number;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   theme: 'dark' | 'light';
@@ -49,12 +50,57 @@ export function Sidebar({
   currentView,
   onNavigate,
   approvalCount,
+  waitingAgentCount,
   collapsed,
   onToggleCollapsed,
   theme,
   onToggleTheme,
 }: SidebarProps): React.ReactElement {
   const logoSrc = theme === 'dark' ? logoDarkSrc : logoLightSrc;
+
+  // Drag-to-popout for the Specs nav item using implicit mouse capture.
+  // When mousedown fires on an element, document-level mousemove/mouseup
+  // keep firing even after the cursor leaves the window. clientX/clientY
+  // go negative or beyond viewport bounds, letting us detect "outside".
+  const specWasDragged = useRef(false);
+
+  const handleSpecMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let dragging = false;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dragging) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 6) {
+          dragging = true;
+          document.body.style.cursor = 'grabbing';
+        }
+      }
+    };
+
+    const onMouseUp = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      if (!dragging) return;
+      specWasDragged.current = true;
+      const outside =
+        ev.clientX < 0 ||
+        ev.clientY < 0 ||
+        ev.clientX > window.innerWidth ||
+        ev.clientY > window.innerHeight;
+      if (outside) {
+        const sx = window.screenX + ev.clientX;
+        const sy = window.screenY + ev.clientY;
+        window.athanor.invoke('window:open-spec-popout' as never, { x: sx, y: sy });
+      }
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, []);
+
   return (
     <nav
       style={{
@@ -181,11 +227,19 @@ export function Sidebar({
       >
         {navItems.map((item) => {
           const isActive = currentView === item.kind;
+          const isSpecs = item.kind === 'specs';
           return (
             <button
               key={item.kind}
-              onClick={() => onNavigate(item.kind)}
+              onClick={() => {
+                if (specWasDragged.current) {
+                  specWasDragged.current = false;
+                  return;
+                }
+                onNavigate(item.kind);
+              }}
               title={collapsed ? item.label : undefined}
+              onMouseDown={isSpecs ? handleSpecMouseDown : undefined}
               style={{
                 position: 'relative',
                 display: 'flex',
@@ -233,6 +287,25 @@ export function Sidebar({
               )}
               <item.icon size={18} strokeWidth={isActive ? 2 : 1.75} style={{ flexShrink: 0 }} />
               {!collapsed && <span>{item.label}</span>}
+              {item.kind === 'agents' && waitingAgentCount > 0 && (
+                <span
+                  style={{
+                    marginLeft: collapsed ? 0 : 'auto',
+                    background: 'rgba(218, 178, 87, 0.2)',
+                    color: 'var(--color-accent-gold)',
+                    fontSize: collapsed ? '0.5625rem' : '0.6875rem',
+                    fontWeight: 600,
+                    padding: collapsed ? '0 4px' : '1px 7px',
+                    borderRadius: 9999,
+                    position: collapsed ? 'absolute' : 'static',
+                    top: collapsed ? 4 : undefined,
+                    right: collapsed ? 4 : undefined,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {waitingAgentCount}
+                </span>
+              )}
               {item.kind === 'approvals' && approvalCount > 0 && (
                 <span
                   style={{

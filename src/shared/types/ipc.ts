@@ -39,7 +39,8 @@ export type IpcChannel =
   | 'artifact:toggle-pin'
   | 'artifact:delete'
   | 'shell:open-external'
-  | 'shell:pick-folder';
+  | 'shell:pick-folder'
+  | 'window:open-spec-popout';
 
 export type PushChannel =
   | 'agent:token'

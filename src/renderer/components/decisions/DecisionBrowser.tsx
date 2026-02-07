@@ -1,13 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DecisionDetail } from './DecisionDetail';
-import { ConfirmDialog } from '../shared/ConfirmDialog';
 import {
   Brain,
   Clock,
   ArrowRight,
   ChevronRight,
   ChevronDown,
-  Trash2,
 } from 'lucide-react';
 
 interface Decision {
@@ -59,7 +57,6 @@ export function DecisionBrowser(): React.ReactElement {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<Decision | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const loadGroups = useCallback(
@@ -133,7 +130,7 @@ export function DecisionBrowser(): React.ReactElement {
     setSelectedDecision(updated);
   }
 
-  // Callback from DecisionDetail or inline delete: decision was deleted
+  // Callback from DecisionDetail: decision was deleted
   function handleDecisionDeleted(id: string) {
     setSessionGroups((prev) =>
       prev
@@ -145,18 +142,6 @@ export function DecisionBrowser(): React.ReactElement {
     );
     if (selectedDecision?.id === id) {
       setSelectedDecision(null);
-    }
-  }
-
-  async function confirmInlineDelete() {
-    if (!deleteTarget) return;
-    try {
-      await window.athanor.invoke('decision:delete' as never, deleteTarget.id);
-      handleDecisionDeleted(deleteTarget.id);
-    } catch (err) {
-      console.error('Failed to delete decision:', err);
-    } finally {
-      setDeleteTarget(null);
     }
   }
 
@@ -272,7 +257,7 @@ export function DecisionBrowser(): React.ReactElement {
 
                 {/* Decision cards */}
                 {!isCollapsed && (
-                  <div className="ml-5 stagger-children">
+                  <div className="ml-5 flex flex-col gap-4 stagger-children">
                     {group.decisions.map((decision) => {
                       const tags = parseJsonArray(decision.tags);
                       const isDecision = decision.type === 'decision';
@@ -281,15 +266,15 @@ export function DecisionBrowser(): React.ReactElement {
                         <button
                           key={decision.id}
                           onClick={() => setSelectedDecision(decision)}
-                          className="card card-accent-left mb-3 block w-full text-left cursor-pointer group"
+                          className="card card-accent-left p-6 pl-7 block w-full text-left cursor-pointer group"
                           style={{
                             borderLeftColor: isDecision
                               ? 'var(--color-status-running)'
                               : 'var(--color-accent-ember)',
                           }}
                         >
-                          <div className="relative z-[1] p-6 pl-7">
-                            {/* Header: badges + timestamp + delete */}
+                          <div className="relative z-[1]">
+                            {/* Header: badges + timestamp */}
                             <div className="flex items-center gap-2 mb-3">
                               <span
                                 className={`badge ${isDecision ? 'badge-blue' : 'badge-ember'}`}
@@ -308,16 +293,6 @@ export function DecisionBrowser(): React.ReactElement {
                                     {new Date(decision.created_at).toLocaleString()}
                                   </span>
                                 </span>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setDeleteTarget(decision);
-                                  }}
-                                  className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity duration-150 text-status-failed p-1 rounded"
-                                  title="Delete decision"
-                                >
-                                  <Trash2 size={13} strokeWidth={2} />
-                                </button>
                                 <ChevronRight
                                   size={14}
                                   strokeWidth={2}
@@ -373,14 +348,6 @@ export function DecisionBrowser(): React.ReactElement {
           </div>
         )}
       </div>
-
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        title="Delete Decision"
-        description={`"${deleteTarget?.question ?? ''}" will be permanently deleted.`}
-        onConfirm={confirmInlineDelete}
-        onCancel={() => setDeleteTarget(null)}
-      />
     </div>
   );
 }

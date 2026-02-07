@@ -40,6 +40,7 @@ const ALLOWED_REQUEST_CHANNELS = new Set<IpcChannel>([
   'artifact:delete',
   'shell:open-external',
   'shell:pick-folder',
+  'window:open-spec-popout',
 ]);
 
 const ALLOWED_PUSH_CHANNELS = new Set<PushChannel>([

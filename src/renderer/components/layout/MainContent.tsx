@@ -38,7 +38,7 @@ export function MainContent({ view, onNavigate }: MainContentProps): React.React
         />
       );
     case 'approvals':
-      return <ApprovalQueue />;
+      return <ApprovalQueue onNavigate={onNavigate} />;
     case 'workflows':
       return (
         <WorkflowList

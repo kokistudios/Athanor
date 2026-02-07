@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PhaseEditor, type PhaseData } from './PhaseEditor';
-import { ArrowLeft, Plus, Save, Workflow } from 'lucide-react';
+import { ArrowLeft, Plus, Save, Workflow, Trash2 } from 'lucide-react';
+import { ConfirmDialog } from '../shared/ConfirmDialog';
 
 function parsePermissionMode(config: string | null): PhaseData['permission_mode'] {
   if (!config) return 'default';
@@ -16,17 +17,20 @@ interface WorkflowEditorProps {
   workflowId?: string;
   onSaved: () => void;
   onCancel: () => void;
+  onDeleted?: () => void;
 }
 
 export function WorkflowEditor({
   workflowId,
   onSaved,
   onCancel,
+  onDeleted,
 }: WorkflowEditorProps): React.ReactElement {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [phases, setPhases] = useState<PhaseData[]>([]);
   const [saving, setSaving] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (!workflowId) return;
@@ -120,6 +124,18 @@ export function WorkflowEditor({
     }
   };
 
+  const handleDelete = async () => {
+    if (!workflowId) return;
+    try {
+      await window.athanor.invoke('workflow:delete' as never, workflowId);
+      onDeleted?.();
+    } catch (err) {
+      console.error('Failed to delete workflow:', err);
+    } finally {
+      setShowDeleteConfirm(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       <div className="page-header">
@@ -133,6 +149,17 @@ export function WorkflowEditor({
         <div className="flex items-center gap-3">
           <Workflow size={18} strokeWidth={1.75} className="text-accent-ember" />
           <h2>{workflowId ? 'Edit Workflow' : 'New Workflow'}</h2>
+          {workflowId && (
+            <div className="ml-auto flex items-center gap-1">
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="btn-ghost flex items-center gap-1.5 text-status-failed"
+              >
+                <Trash2 size={13} strokeWidth={2} />
+                <span className="text-[0.75rem]">Delete</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -215,6 +242,14 @@ export function WorkflowEditor({
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete Workflow"
+        description={`"${name || 'Untitled workflow'}" will be permanently deleted.`}
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </div>
   );
 }

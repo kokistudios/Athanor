@@ -240,7 +240,7 @@ border: 1px solid var(--color-border-default);  /* visible, not subtle */
 border-radius: 6px;
 ```
 
-Cards get shadow on hover in dark mode (`0 4px 12px rgba(0,0,0,0.2)`), stronger shadows in light mode. Internal padding: `p-5` for forms/detail content, `p-3`–`p-4` for list items.
+Cards get shadow on hover in dark mode (`0 4px 12px rgba(0,0,0,0.2)`), stronger shadows in light mode. `.card` now includes a comfortable default interior padding (~16-20px). Use `card-flush` when a child wrapper controls spacing, and override with `p-5`/`p-6` for roomier detail cards.
 
 ### Buttons
 

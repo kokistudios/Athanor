@@ -170,28 +170,37 @@ export function WorkspaceDetail({
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="page-header">
+        <button
+          onClick={onBack}
+          className="btn-ghost flex items-center gap-1.5 !px-0 !py-0 text-[0.75rem] mb-2"
+        >
+          <ArrowLeft size={13} />
+          Back to workspaces
+        </button>
         <div className="flex items-center gap-3">
-          <button onClick={onBack} className="btn-icon">
-            <ArrowLeft size={14} />
-          </button>
+          <FolderGit2 size={18} strokeWidth={1.75} className="text-accent-ember" />
           {!editing ? (
             <>
-              <h2 className="text-text-primary text-lg font-semibold flex-1">{workspace.name}</h2>
-              <button
-                onClick={() => {
-                  setEditing(true);
-                  setShowAddRepo(false);
-                }}
-                className="btn-secondary flex items-center gap-1.5"
-              >
-                <Pencil size={12} /> Edit
-              </button>
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                className="btn-danger flex items-center gap-1.5"
-              >
-                <Trash2 size={12} /> Delete
-              </button>
+              <h2>{workspace.name}</h2>
+              <div className="ml-auto flex items-center gap-1">
+                <button
+                  onClick={() => {
+                    setEditing(true);
+                    setShowAddRepo(false);
+                  }}
+                  className="btn-ghost flex items-center gap-1.5"
+                >
+                  <Pencil size={13} strokeWidth={2} />
+                  <span className="text-[0.75rem]">Edit</span>
+                </button>
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="btn-ghost flex items-center gap-1.5 text-status-failed"
+                >
+                  <Trash2 size={13} strokeWidth={2} />
+                  <span className="text-[0.75rem]">Delete</span>
+                </button>
+              </div>
             </>
           ) : (
             <>
@@ -199,26 +208,28 @@ export function WorkspaceDetail({
                 type="text"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
-                className="input-base flex-1 text-[0.9375rem]"
+                className="input-base flex-1 max-w-[420px] text-[0.9375rem]"
               />
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="btn-primary flex items-center gap-1.5"
-              >
-                <Save size={12} /> {saving ? 'Saving...' : 'Save'}
-              </button>
-              <button
-                onClick={() => {
-                  setEditing(false);
-                  setShowAddRepo(false);
-                  setEditName(workspace.name);
-                  setEditRepoId(workspace.repo_id);
-                }}
-                className="btn-secondary flex items-center gap-1.5"
-              >
-                <X size={12} /> Cancel
-              </button>
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="btn-primary flex items-center gap-1.5"
+                >
+                  <Save size={12} /> {saving ? 'Saving...' : 'Save'}
+                </button>
+                <button
+                  onClick={() => {
+                    setEditing(false);
+                    setShowAddRepo(false);
+                    setEditName(workspace.name);
+                    setEditRepoId(workspace.repo_id);
+                  }}
+                  className="btn-secondary flex items-center gap-1.5"
+                >
+                  <X size={12} /> Cancel
+                </button>
+              </div>
             </>
           )}
         </div>

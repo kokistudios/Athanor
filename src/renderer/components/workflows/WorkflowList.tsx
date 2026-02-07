@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { WorkflowEditor } from './WorkflowEditor';
-import { Plus, Pencil, Trash2, Workflow, Clock, ChevronRight } from 'lucide-react';
-import { ConfirmDialog } from '../shared/ConfirmDialog';
+import { Plus, Workflow, Clock, ChevronRight } from 'lucide-react';
 
 interface WorkflowData {
   id: string;
@@ -23,7 +22,6 @@ export function WorkflowList({
   const [workflows, setWorkflows] = useState<WorkflowData[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [deleteTarget, setDeleteTarget] = useState<WorkflowData | null>(null);
 
   const fetchWorkflows = async () => {
     setLoading(true);
@@ -50,6 +48,10 @@ export function WorkflowList({
           fetchWorkflows();
         }}
         onCancel={() => setEditing(null)}
+        onDeleted={() => {
+          setEditing(null);
+          fetchWorkflows();
+        }}
       />
     );
   }
@@ -63,6 +65,10 @@ export function WorkflowList({
           fetchWorkflows();
         }}
         onCancel={() => onSelectWorkflow('')}
+        onDeleted={() => {
+          onSelectWorkflow('');
+          fetchWorkflows();
+        }}
       />
     );
   }
@@ -84,11 +90,11 @@ export function WorkflowList({
         <div className="content-area">
           {loading && <div className="text-text-tertiary text-[0.8125rem]">Loading...</div>}
 
-          <div className="stagger-children">
+          <div className="flex flex-col gap-4 stagger-children">
             {workflows.map((wf) => (
               <div
                 key={wf.id}
-                className="card card-accent-left mb-3 group cursor-pointer"
+                className="card card-accent-left card-flush group cursor-pointer"
                 onClick={() => setEditing(wf.id)}
               >
                 <div className="relative z-[1] p-6 pl-7 flex items-center gap-4">
@@ -109,30 +115,8 @@ export function WorkflowList({
                     </div>
                   </div>
 
-                  {/* Actions */}
+                  {/* Trailing affordance */}
                   <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditing(wf.id);
-                        }}
-                        className="btn-icon"
-                        title="Edit"
-                      >
-                        <Pencil size={13} />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteTarget(wf);
-                        }}
-                        className="btn-icon !text-status-failed"
-                        title="Delete"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
                     <ChevronRight
                       size={14}
                       strokeWidth={2}
@@ -157,19 +141,6 @@ export function WorkflowList({
           )}
         </div>
       </div>
-
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        title="Delete Workflow"
-        description={`"${deleteTarget?.name}" will be permanently deleted.`}
-        onConfirm={async () => {
-          if (!deleteTarget) return;
-          await window.athanor.invoke('workflow:delete' as never, deleteTarget.id);
-          setDeleteTarget(null);
-          fetchWorkflows();
-        }}
-        onCancel={() => setDeleteTarget(null)}
-      />
     </div>
   );
 }

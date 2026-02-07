@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, X, OctagonX, PenLine } from 'lucide-react';
+import { ArrowUp, Check, X, OctagonX } from 'lucide-react';
 import { useAgentStream } from '../../hooks/useAgentStream';
 import { MessageBubble } from './MessageBubble';
 import { StreamingText } from './StreamingText';
@@ -75,7 +75,7 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const [approvalResponses, setApprovalResponses] = useState<Record<string, string>>({});
-  const [showCustomEditor, setShowCustomEditor] = useState<Record<string, boolean>>({});
+  const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const { streamingText, isStreaming } = useAgentStream(agentId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -98,6 +98,25 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
       }
     });
 
+    return cleanup;
+  }, [agentId]);
+
+  // Track agent status for waiting indicator
+  useEffect(() => {
+    async function loadStatus() {
+      try {
+        const agents = (await window.athanor.invoke('agent:list' as never)) as { id: string; status: string }[];
+        const agent = agents.find((a) => a.id === agentId);
+        if (agent) setAgentStatus(agent.status);
+      } catch {
+        // ignore
+      }
+    }
+    loadStatus();
+    const cleanup = window.athanor.on('agent:status-change' as never, (data: unknown) => {
+      const { agentId: changedId, status } = data as { agentId: string; status: string };
+      if (changedId === agentId) setAgentStatus(status);
+    });
     return cleanup;
   }, [agentId]);
 
@@ -189,12 +208,6 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
         delete next[approvalId];
         return next;
       });
-      // Clean up custom editor state
-      setShowCustomEditor((prev) => {
-        const next = { ...prev };
-        delete next[approvalId];
-        return next;
-      });
     } catch (err) {
       console.error('Failed to resolve approval:', err);
     } finally {
@@ -206,7 +219,7 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
     <div className="flex flex-col h-full bg-surface-0">
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-auto scrollbar-thin">
-        <div className="py-6 pb-24 px-[10%]">
+        <div className="py-6 pb-24 px-[10%] pr-[12%]">
           {historicalMessages.length === 0 && !isStreaming && pendingApprovals.length === 0 && (
             <div className="flex items-center justify-center py-24">
               <div className="text-text-tertiary text-[0.8125rem]">Waiting for agent output...</div>
@@ -220,17 +233,17 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
 
             {isStreaming && streamingText && <StreamingText text={streamingText} />}
 
-            {pendingApprovals.map((approval) => {
+            {/* Only show inline approval cards for formal approval types */}
+            {pendingApprovals
+              .filter((a) => a.type !== 'needs_input' && a.type !== 'agent_idle')
+              .map((approval) => {
               const decisionPayload = approval.type === 'decision' ? parseDecisionPayload(approval.payload) : null;
               const detail = !decisionPayload ? getApprovalDetail(approval.payload) : null;
-              const isContinuation = approval.type === 'needs_input' || approval.type === 'agent_idle';
-              const customEditorOpen = showCustomEditor[approval.id] ?? false;
-              const customText = approvalResponses[approval.id] || '';
               return (
                 <div key={approval.id} className="animate-fade-in my-2">
                   <div className="rounded-xl bg-surface-2 border border-accent-ember/20 p-4">
                     <div className="text-[0.6875rem] text-accent-ember font-medium tracking-wide uppercase mb-2">
-                      {isContinuation ? 'Action Required' : 'Approval Required'}
+                      Approval Required
                     </div>
                     <div className="text-[0.8125rem] text-text-primary leading-relaxed mb-2">
                       {approval.summary}
@@ -250,121 +263,37 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
                       </div>
                     )}
 
-                    {isContinuation ? (
-                      <>
-                        {customEditorOpen && (
-                          <textarea
-                            value={customText}
-                            onChange={(e) =>
-                              setApprovalResponses((prev) => ({
-                                ...prev,
-                                [approval.id]: e.target.value,
-                              }))
-                            }
-                            onKeyDown={(e) => {
-                              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && customText.trim()) {
-                                e.preventDefault();
-                                void handleResolveApproval(approval.id, 'approved', customText);
-                              }
-                            }}
-                            placeholder="Your response..."
-                            rows={2}
-                            className="input-base w-full mt-2 mb-2 min-h-[48px] resize-y font-mono text-[0.75rem] leading-relaxed"
-                            autoFocus
-                          />
-                        )}
-                        <div className="flex gap-2 mt-1">
-                          <button
-                            onClick={() => void handleResolveApproval(approval.id, 'approved', PHASE_TERMINATE_TEXT)}
-                            disabled={resolvingApprovalId === approval.id}
-                            className="btn-danger flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
-                          >
-                            <OctagonX size={12} />
-                            Phase Terminate
-                          </button>
-                          <button
-                            onClick={() => void handleResolveApproval(approval.id, 'approved', 'Continue.')}
-                            disabled={resolvingApprovalId === approval.id}
-                            className="btn-primary flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
-                          >
-                            <Check size={12} />
-                            Affirm
-                          </button>
-                          {customEditorOpen ? (
-                            <>
-                              <button
-                                onClick={() => {
-                                  setShowCustomEditor((prev) => ({ ...prev, [approval.id]: false }));
-                                  setApprovalResponses((prev) => {
-                                    const next = { ...prev };
-                                    delete next[approval.id];
-                                    return next;
-                                  });
-                                }}
-                                disabled={resolvingApprovalId === approval.id}
-                                className="btn-ghost flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
-                              >
-                                <X size={12} />
-                                Cancel
-                              </button>
-                              {customText.trim() && (
-                                <button
-                                  onClick={() => void handleResolveApproval(approval.id, 'approved', customText)}
-                                  disabled={resolvingApprovalId === approval.id}
-                                  className="btn-primary flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
-                                >
-                                  <ArrowUp size={12} />
-                                  Send
-                                </button>
-                              )}
-                            </>
-                          ) : (
-                            <button
-                              onClick={() => setShowCustomEditor((prev) => ({ ...prev, [approval.id]: true }))}
-                              disabled={resolvingApprovalId === approval.id}
-                              className="btn-secondary flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
-                            >
-                              <PenLine size={12} />
-                              Custom
-                            </button>
-                          )}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        {/* Response textarea for standard approvals */}
-                        <textarea
-                          value={approvalResponses[approval.id] || ''}
-                          onChange={(e) =>
-                            setApprovalResponses((prev) => ({
-                              ...prev,
-                              [approval.id]: e.target.value,
-                            }))
-                          }
-                          placeholder="Optional response..."
-                          rows={2}
-                          className="input-base w-full mt-2 mb-2 min-h-[48px] resize-y font-mono text-[0.75rem] leading-relaxed"
-                        />
-                        <div className="flex gap-2 mt-1">
-                          <button
-                            onClick={() => void handleResolveApproval(approval.id, 'approved')}
-                            disabled={resolvingApprovalId === approval.id}
-                            className="btn-primary flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
-                          >
-                            <Check size={12} />
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => void handleResolveApproval(approval.id, 'rejected')}
-                            disabled={resolvingApprovalId === approval.id}
-                            className="btn-ghost flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem] !text-status-failed !border-status-failed/30 !border"
-                          >
-                            <X size={12} />
-                            Reject
-                          </button>
-                        </div>
-                      </>
-                    )}
+                    {/* Response textarea for standard approvals */}
+                    <textarea
+                      value={approvalResponses[approval.id] || ''}
+                      onChange={(e) =>
+                        setApprovalResponses((prev) => ({
+                          ...prev,
+                          [approval.id]: e.target.value,
+                        }))
+                      }
+                      placeholder="Optional response..."
+                      rows={2}
+                      className="input-base w-full mt-2 mb-2 min-h-[48px] resize-y font-mono text-[0.75rem] leading-relaxed"
+                    />
+                    <div className="flex gap-2 mt-1">
+                      <button
+                        onClick={() => void handleResolveApproval(approval.id, 'approved')}
+                        disabled={resolvingApprovalId === approval.id}
+                        className="btn-primary flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem]"
+                      >
+                        <Check size={12} />
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => void handleResolveApproval(approval.id, 'rejected')}
+                        disabled={resolvingApprovalId === approval.id}
+                        className="btn-ghost flex items-center gap-1.5 !py-1.5 !px-3 !text-[0.75rem] !text-status-failed !border-status-failed/30 !border"
+                      >
+                        <X size={12} />
+                        Reject
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -373,8 +302,20 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
         </div>
       </div>
 
+      {/* Waiting indicator */}
+      {agentStatus === 'waiting' && (
+        <div className="shrink-0 px-[10%] animate-fade-in">
+          <div className="flex items-center gap-2 py-2">
+            <span className="status-dot status-dot-waiting" />
+            <span className="text-[0.75rem] text-accent-gold font-medium">
+              Agent is waiting for your response
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Composer */}
-      <div className="shrink-0 px-[10%]" style={{ paddingTop: 20, paddingBottom: 24 }}>
+      <div className="shrink-0 px-[10%]" style={{ paddingTop: agentStatus === 'waiting' ? 4 : 20, paddingBottom: 24 }}>
         <div className="rounded-2xl bg-surface-1 border border-border-default shadow-[0_2px_24px_rgba(0,0,0,0.12)] focus-within:border-accent-ember/30 focus-within:shadow-[0_2px_32px_rgba(212,105,46,0.06)] transition-all duration-200 overflow-hidden">
           <textarea
             ref={textareaRef}
@@ -398,6 +339,22 @@ export function AgentThread({ agentId }: AgentThreadProps): React.ReactElement {
             autoComplete="off"
           />
           <div className="flex items-center justify-end gap-3" style={{ padding: '0 20px 16px' }}>
+            {agentStatus === 'waiting' && (
+              <button
+                onClick={() => {
+                  setIsSending(true);
+                  void window.athanor
+                    .invoke('agent:send-input' as never, agentId, PHASE_TERMINATE_TEXT)
+                    .catch((err: unknown) => console.error('Failed to end phase:', err))
+                    .finally(() => setIsSending(false));
+                }}
+                disabled={isSending}
+                className="btn-danger flex items-center gap-1.5 !py-1 !px-3 !text-[0.75rem]"
+              >
+                <OctagonX size={12} />
+                End Phase
+              </button>
+            )}
             <span className="text-text-tertiary/50 select-none text-[1.875rem] leading-none">
               <kbd className="font-mono">⌘↵</kbd>
             </span>

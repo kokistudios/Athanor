@@ -299,20 +299,16 @@ export class AgentManager extends EventEmitter {
         const content = JSON.stringify(message);
         const parentToolUseId =
           (event as { parent_tool_use_id?: string }).parent_tool_use_id || null;
-        const textPreview = this.extractMessageText(message);
 
         let contentPreview: string | null = null;
         let contentPath: string | null = null;
 
-        if (textPreview) {
-          contentPreview = textPreview.slice(0, previewLen);
-        } else if (content.length <= previewLen) {
+        // Always store the full message JSON so the renderer can access
+        // all content blocks (text, thinking, tool_use), not just text.
+        if (content.length <= previewLen) {
           contentPreview = content;
         } else {
           contentPreview = content.slice(0, previewLen);
-        }
-
-        if (content.length > previewLen) {
           const key = `sessions/${agentId}/messages/${messageId}.json`;
           await this.contentStore.write(key, content);
           contentPath = key;

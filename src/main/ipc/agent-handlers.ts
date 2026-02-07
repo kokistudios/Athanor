@@ -75,7 +75,57 @@ export function registerAgentHandlers(
     'agent:send-input',
     sendInputArgsSchema,
     async (_event, agentId, input) => {
+      // Check if the agent was waiting before sending input
+      const agent = await db
+        .selectFrom('agents')
+        .select(['status', 'session_id'])
+        .where('id', '=', agentId)
+        .executeTakeFirst();
+
       await services.agentManager.sendInput(agentId, input);
+
+      if (agent && agent.status === 'waiting') {
+        // Set agent status back to running
+        await db
+          .updateTable('agents')
+          .set({ status: 'running' })
+          .where('id', '=', agentId)
+          .execute();
+        mainWindow.webContents.send('agent:status-change', { agentId, status: 'running' });
+
+        // Auto-resolve any pending agent_idle/needs_input approvals for this agent
+        const pendingApprovals = await db
+          .selectFrom('approvals')
+          .select(['id'])
+          .where('agent_id', '=', agentId)
+          .where('status', '=', 'pending')
+          .where((eb) =>
+            eb.or([eb('type', '=', 'agent_idle'), eb('type', '=', 'needs_input')]),
+          )
+          .execute();
+
+        for (const approval of pendingApprovals) {
+          await db
+            .updateTable('approvals')
+            .set({
+              status: 'approved' as const,
+              response: 'Resolved via chat',
+              resolved_at: new Date().toISOString(),
+            })
+            .where('id', '=', approval.id)
+            .execute();
+          mainWindow.webContents.send('approval:resolved', {
+            id: approval.id,
+            agent_id: agentId,
+            type: 'agent_idle',
+            status: 'approved',
+          });
+        }
+
+        // Set session back to active
+        await services.workflowEngine.setSessionStatus(agent.session_id, 'active');
+      }
+
       return { success: true };
     },
   );

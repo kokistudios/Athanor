@@ -1,34 +1,27 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TransparentMarkdownEditor } from '../shared/TransparentMarkdownEditor';
-import { NotebookPen, ExternalLink } from 'lucide-react';
 
-export function SpecEditor(): React.ReactElement {
+export function SpecPopout(): React.ReactElement {
   const [content, setContent] = useState('');
 
-  const handlePopout = useCallback(() => {
-    window.athanor.invoke('window:open-spec-popout' as never);
+  // Apply dark theme to :root
+  useEffect(() => {
+    document.documentElement.classList.add('dark');
   }, []);
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-5 md:px-8">
-        <div className="page-header flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <NotebookPen size={18} strokeWidth={1.75} className="text-accent-ember" />
-            <h2>Spec Editor</h2>
-          </div>
-          <button
-            onClick={handlePopout}
-            title="Pop out into separate window"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-text-tertiary hover:text-text-primary hover:bg-surface-2 transition-colors cursor-pointer"
-          >
-            <ExternalLink size={13} strokeWidth={1.75} />
-            <span>Pop out</span>
-          </button>
-        </div>
+    <div className="flex flex-col h-screen bg-surface-0 text-text-primary font-sans">
+      {/* Draggable title bar region */}
+      <div
+        className="flex items-center justify-between px-4 py-2 select-none border-b border-border-subtle"
+        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      >
+        <span className="text-xs font-medium text-text-secondary tracking-wide uppercase">
+          Spec Editor
+        </span>
       </div>
 
-      <div className="flex-1 min-h-0 px-5 md:px-8 pb-5 md:pb-8">
+      <div className="flex-1 min-h-0 p-4">
         <div className="h-full rounded-lg border border-border-subtle bg-surface-1 overflow-hidden">
           <TransparentMarkdownEditor
             value={content}

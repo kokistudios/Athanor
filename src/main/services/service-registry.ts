@@ -55,21 +55,42 @@ export function createServices(db: Kysely<Database>, config: AthanorConfig): Ser
         type: 'agent_idle',
         summary: 'Agent finished its turn — waiting for your input or a nudge to complete.',
       });
-      await workflowEngine.setSessionStatus(event.sessionId, 'waiting_approval');
+      // Session stays active — chat-type approvals don't block the session.
+      // The agent is already 'waiting' (set by agent-manager.ts).
     } catch (err) {
       console.error('Error creating agent_idle approval:', err);
     }
   });
 
-  // When a needs_input approval is created, set session to waiting_approval
-  approvalRouter.on(
-    'approval:new',
-    async (approval: { session_id: string; type: string }) => {
-      if (approval.type === 'needs_input' || approval.type === 'agent_idle') {
+  // Clean up stale chat-type approvals when an agent exits
+  agentManager.on(
+    'agent:status-change',
+    async (event: { agentId: string; status: string }) => {
+      if (event.status === 'completed' || event.status === 'failed') {
         try {
-          await workflowEngine.setSessionStatus(approval.session_id, 'waiting_approval');
+          const staleApprovals = await db
+            .selectFrom('approvals')
+            .select(['id'])
+            .where('agent_id', '=', event.agentId)
+            .where('status', '=', 'pending')
+            .where((eb) =>
+              eb.or([eb('type', '=', 'agent_idle'), eb('type', '=', 'needs_input')]),
+            )
+            .execute();
+
+          for (const approval of staleApprovals) {
+            await db
+              .updateTable('approvals')
+              .set({
+                status: 'approved' as const,
+                response: 'Auto-resolved: agent exited',
+                resolved_at: new Date().toISOString(),
+              })
+              .where('id', '=', approval.id)
+              .execute();
+          }
         } catch (err) {
-          console.error('Error setting session to waiting_approval for needs_input:', err);
+          console.error('Error cleaning up stale approvals on agent exit:', err);
         }
       }
     },
@@ -147,20 +168,26 @@ export function createServices(db: Kysely<Database>, config: AthanorConfig): Ser
       if (approval.type === 'needs_input' || approval.type === 'agent_idle') {
         try {
           if (approval.status === 'approved' && approval.agent_id) {
-            // Send the user's response text to the waiting agent.
-            // A non-empty string is required — the Claude API rejects empty text blocks.
-            const inputText = approval.response?.trim() || 'Continue.';
-            await agentManager.sendInput(approval.agent_id, inputText);
-
-            // Update agent status back to running
-            await db
-              .updateTable('agents')
-              .set({ status: 'running' })
+            // Guard: check if agent is still waiting. If the chat handler
+            // already resolved this (agent is 'running'), skip to prevent double-send.
+            const agent = await db
+              .selectFrom('agents')
+              .select('status')
               .where('id', '=', approval.agent_id)
-              .execute();
+              .executeTakeFirst();
 
-            // Set session back to active
-            await workflowEngine.setSessionStatus(approval.session_id, 'active');
+            if (agent && agent.status === 'waiting') {
+              const inputText = approval.response?.trim() || 'Continue.';
+              await agentManager.sendInput(approval.agent_id, inputText);
+
+              await db
+                .updateTable('agents')
+                .set({ status: 'running' })
+                .where('id', '=', approval.agent_id)
+                .execute();
+
+              await workflowEngine.setSessionStatus(approval.session_id, 'active');
+            }
           } else if (approval.status === 'rejected' && approval.agent_id) {
             // Kill the agent — session will transition through handleAgentExit
             await agentManager.killAgent(approval.agent_id);

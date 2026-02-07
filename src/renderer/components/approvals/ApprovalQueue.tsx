@@ -1,9 +1,14 @@
 import React, { useState } from 'react';
 import { useApprovals } from '../../hooks/useApprovals';
 import { ApprovalCard } from './ApprovalCard';
-import { ClipboardClock, ChevronRight, ChevronDown, Clock } from 'lucide-react';
+import { ClipboardClock, ChevronRight, ChevronDown, Clock, MessageSquare } from 'lucide-react';
+import type { View } from '../layout/MainContent';
 
-export function ApprovalQueue(): React.ReactElement {
+interface ApprovalQueueProps {
+  onNavigate?: (view: View) => void;
+}
+
+export function ApprovalQueue({ onNavigate }: ApprovalQueueProps): React.ReactElement {
   const { groups, totalCount, loading, resolve } = useApprovals();
   const [collapsedSessions, setCollapsedSessions] = useState<Set<string>>(new Set());
 
@@ -89,10 +94,41 @@ export function ApprovalQueue(): React.ReactElement {
                 </button>
 
                 {!isCollapsed && (
-                  <div className="ml-5 stagger-children">
-                    {group.approvals.map((approval) => (
-                      <ApprovalCard key={approval.id} approval={approval} onResolve={resolve} />
-                    ))}
+                  <div className="ml-5 flex flex-col gap-4 stagger-children">
+                    {group.approvals.map((approval) => {
+                      const isChatType = approval.type === 'needs_input' || approval.type === 'agent_idle';
+                      if (isChatType) {
+                        return (
+                          <div
+                            key={approval.id}
+                            className="card card-static card-accent-left p-6 pl-7 animate-fade-in"
+                          >
+                            <div className="relative z-[1] flex items-start gap-3">
+                              <MessageSquare size={16} strokeWidth={1.75} className="text-accent-gold flex-shrink-0 mt-0.5" />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[0.8125rem] text-text-primary leading-relaxed">
+                                  {approval.summary}
+                                </div>
+                                <div className="text-[0.6875rem] text-text-tertiary mt-1">
+                                  Respond in the agent&apos;s chat thread
+                                </div>
+                              </div>
+                              {onNavigate && approval.agent_id && (
+                                <button
+                                  onClick={() => onNavigate({ kind: 'agents', agentId: approval.agent_id ?? undefined })}
+                                  className="btn-secondary flex items-center gap-1.5 !py-1 !px-3 !text-[0.75rem] flex-shrink-0"
+                                >
+                                  Open Thread
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return (
+                        <ApprovalCard key={approval.id} approval={approval} onResolve={resolve} />
+                      );
+                    })}
                   </div>
                 )}
               </div>

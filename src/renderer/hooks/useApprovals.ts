@@ -82,7 +82,13 @@ export function useApprovals(): {
     [],
   );
 
-  const totalCount = groups.reduce((sum, g) => sum + g.approvals.length, 0);
+  // Exclude chat-type approvals (needs_input, agent_idle) from formal count —
+  // those are handled in the agent thread, not the approval queue.
+  const totalCount = groups.reduce(
+    (sum, g) =>
+      sum + g.approvals.filter((a) => a.type !== 'needs_input' && a.type !== 'agent_idle').length,
+    0,
+  );
 
   return { groups, totalCount, loading, refetch: fetch, resolve };
 }

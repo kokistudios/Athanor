@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeImage } from 'electron';
 import path from 'path';
 import { execSync } from 'child_process';
 import { loadConfig } from './config/loader';
@@ -156,6 +156,42 @@ const createWindow = (): void => {
   });
 };
 
+const specWindows = new Set<BrowserWindow>();
+
+function openSpecPopout(opts?: { x?: number; y?: number }): void {
+  const iconPath = getIconPath();
+  const icon = nativeImage.createFromPath(iconPath);
+
+  const winOpts: Electron.BrowserWindowConstructorOptions = {
+    width: 720,
+    height: 600,
+    title: 'Athanor — Spec Editor',
+    icon,
+    webPreferences: {
+      preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  };
+
+  if (opts?.x != null && opts?.y != null) {
+    winOpts.x = Math.round(opts.x - 360);
+    winOpts.y = Math.round(opts.y - 40);
+  }
+
+  const specWin = new BrowserWindow(winOpts);
+  specWindows.add(specWin);
+
+  specWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+  const entryUrl = `${MAIN_WINDOW_WEBPACK_ENTRY}#spec-popout`;
+  specWin.loadURL(entryUrl);
+
+  specWin.on('closed', () => {
+    specWindows.delete(specWin);
+  });
+}
+
 app.on('ready', async () => {
   try {
     await bootstrap();
@@ -164,6 +200,11 @@ app.on('ready', async () => {
     console.error('Bootstrap failed:', err);
   }
   createWindow();
+
+  // Spec popout window — no services dependency, register unconditionally
+  ipcMain.handle('window:open-spec-popout', (_event, opts?: { x?: number; y?: number }) => {
+    openSpecPopout(opts);
+  });
 
   // Register IPC handlers (Phase 3 will populate this)
   if (services && mainWindow) {

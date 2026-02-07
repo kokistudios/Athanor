@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { WorkspaceDetail } from './WorkspaceDetail';
 import {
   Plus,
-  Trash2,
   FolderGit2,
   FolderOpen,
   Orbit,
@@ -10,7 +9,6 @@ import {
   GitBranch,
   ChevronRight,
 } from 'lucide-react';
-import { ConfirmDialog } from '../shared/ConfirmDialog';
 
 interface Repo {
   id: string;
@@ -50,7 +48,6 @@ export function WorkspaceDashboard({
   const [newRepoName, setNewRepoName] = useState('');
   const [addingRepo, setAddingRepo] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Workspace | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -260,7 +257,7 @@ export function WorkspaceDashboard({
               return (
                 <div
                   key={ws.id}
-                  className="card card-accent-left mb-3 group cursor-pointer"
+                  className="card card-accent-left card-flush mb-3 group cursor-pointer"
                   onClick={() => onSelectWorkspace(ws.id)}
                 >
                   <div className="relative z-[1] p-6 pl-7 flex items-center gap-4">
@@ -291,16 +288,6 @@ export function WorkspaceDashboard({
 
                     {/* Actions */}
                     <div className="flex items-center gap-1.5 flex-shrink-0">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteTarget(ws);
-                        }}
-                        className="btn-icon !w-7 !h-7 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-                        title="Delete workspace"
-                      >
-                        <Trash2 size={12} />
-                      </button>
                       <ChevronRight
                         size={14}
                         strokeWidth={2}
@@ -326,19 +313,6 @@ export function WorkspaceDashboard({
           )}
         </div>
       </div>
-
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        title="Delete Workspace"
-        description={`"${deleteTarget?.name}" will be permanently deleted.`}
-        onConfirm={async () => {
-          if (!deleteTarget) return;
-          await window.athanor.invoke('db:delete-workspace' as never, deleteTarget.id);
-          setDeleteTarget(null);
-          loadData();
-        }}
-        onCancel={() => setDeleteTarget(null)}
-      />
     </div>
   );
 }

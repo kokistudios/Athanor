@@ -1,14 +1,32 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowLeft, Pause, Play, Folders, ShieldAlert, Pin, PinOff, Trash2, ChevronDown, ChevronRight, FileText } from 'lucide-react';
+import {
+  ArrowLeft,
+  Pause,
+  Play,
+  Folders,
+  ShieldAlert,
+  Pin,
+  PinOff,
+  Trash2,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  Bot,
+  Lightbulb,
+  MessageSquareText,
+  Clock,
+} from 'lucide-react';
 import { secureMarkdownComponents } from '../shared/markdown-security';
 import { ApprovalCard } from '../approvals/ApprovalCard';
 import { useApprovals } from '../../hooks/useApprovals';
+import { ConfirmDialog } from '../shared/ConfirmDialog';
 
 interface SessionData {
   id: string;
   status: string;
+  description: string | null;
   current_phase: number | null;
   context: string | null;
   created_at: string;
@@ -40,7 +58,34 @@ interface SessionData {
 interface SessionDetailProps {
   sessionId: string;
   onBack: () => void;
+  onDeleted?: () => void;
 }
+
+const statusBadge: Record<string, string> = {
+  pending: 'badge-neutral',
+  active: 'badge-blue',
+  paused: 'badge-gold',
+  completed: 'badge-green',
+  failed: 'badge-red',
+  waiting_approval: 'badge-gold',
+};
+
+const statusLabel: Record<string, string> = {
+  pending: 'Pending',
+  active: 'Active',
+  paused: 'Paused',
+  completed: 'Completed',
+  failed: 'Failed',
+  waiting_approval: 'Awaiting Approval',
+};
+
+const agentStatusBadge: Record<string, string> = {
+  spawning: 'badge-ember',
+  running: 'badge-blue',
+  waiting: 'badge-gold',
+  completed: 'badge-green',
+  failed: 'badge-red',
+};
 
 function computeTtl(createdAt: string): { label: string; urgent: boolean } {
   const expiresAt = new Date(createdAt).getTime() + 7 * 24 * 60 * 60 * 1000;
@@ -48,6 +93,30 @@ function computeTtl(createdAt: string): { label: string; urgent: boolean } {
   if (remaining <= 0) return { label: 'Expired', urgent: true };
   const days = Math.ceil(remaining / (24 * 60 * 60 * 1000));
   return { label: `Expires in ${days}d`, urgent: days < 2 };
+}
+
+function SectionHeader({
+  icon: Icon,
+  label,
+  count,
+}: {
+  icon: React.ElementType;
+  label: string;
+  count?: number;
+}): React.ReactElement {
+  return (
+    <div className="flex items-center gap-2.5 mb-5">
+      <Icon size={13} strokeWidth={2} className="text-accent-ember" />
+      <h3 className="text-[0.75rem] font-semibold tracking-[0.04em] uppercase text-text-tertiary">
+        {label}
+      </h3>
+      {count !== undefined && count > 0 && (
+        <span className="text-[0.625rem] font-mono text-text-tertiary opacity-60">
+          {count}
+        </span>
+      )}
+    </div>
+  );
 }
 
 function ArtifactCard({
@@ -88,9 +157,9 @@ function ArtifactCard({
   const ttl = isPinned ? null : computeTtl(artifact.created_at);
 
   return (
-    <div className="card card-static mb-3">
+    <div className="card card-static card-flush">
       <div
-        className="p-4 flex items-center gap-3 cursor-pointer select-none"
+        className="px-5 py-4 flex items-center gap-3 cursor-pointer select-none"
         onClick={handleExpand}
       >
         {expanded ? (
@@ -99,7 +168,7 @@ function ArtifactCard({
           <ChevronRight size={14} className="text-text-tertiary flex-shrink-0" />
         )}
         <FileText size={14} strokeWidth={1.75} className="text-accent-ember flex-shrink-0" />
-        <span className="text-[0.875rem] text-text-primary font-medium flex-1 truncate">
+        <span className="text-[0.8125rem] text-text-primary font-medium flex-1 truncate">
           {artifact.name}
         </span>
         {isPinned ? (
@@ -108,7 +177,11 @@ function ArtifactCard({
           ttl && (
             <span
               className="text-[0.6875rem]"
-              style={{ color: ttl.urgent ? 'var(--color-status-failed)' : 'var(--color-text-tertiary)' }}
+              style={{
+                color: ttl.urgent
+                  ? 'var(--color-status-failed)'
+                  : 'var(--color-text-tertiary)',
+              }}
             >
               {ttl.label}
             </span>
@@ -136,12 +209,15 @@ function ArtifactCard({
         </button>
       </div>
       {expanded && (
-        <div className="px-4 pb-4 border-t border-border-subtle pt-4">
+        <div className="px-5 pb-5 border-t border-border-subtle pt-4">
           {loading ? (
             <div className="text-text-tertiary text-[0.8125rem]">Loading...</div>
           ) : (
             <div className="markdown-body text-[0.875rem]">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={secureMarkdownComponents}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={secureMarkdownComponents}
+              >
                 {content || ''}
               </ReactMarkdown>
             </div>
@@ -152,8 +228,13 @@ function ArtifactCard({
   );
 }
 
-export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.ReactElement {
+export function SessionDetail({
+  sessionId,
+  onBack,
+  onDeleted,
+}: SessionDetailProps): React.ReactElement {
   const [session, setSession] = useState<SessionData | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const { groups: approvalGroups, resolve } = useApprovals();
 
   const sessionApprovals =
@@ -184,6 +265,12 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
     [reloadSession],
   );
 
+  const handleDeleteSession = useCallback(async () => {
+    await window.athanor.invoke('session:delete' as never, sessionId);
+    setShowDeleteConfirm(false);
+    onDeleted?.();
+  }, [sessionId, onDeleted]);
+
   useEffect(() => {
     async function load() {
       try {
@@ -195,32 +282,30 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
     }
     load();
 
-    // Re-fetch on session status changes
-    const cleanupStatus = window.athanor.on('session:status-change' as never, (data: unknown) => {
-      const { sessionId: changedId } = data as { sessionId: string };
-      if (changedId === sessionId) {
-        load();
-      }
-    });
+    const cleanupStatus = window.athanor.on(
+      'session:status-change' as never,
+      (data: unknown) => {
+        const { sessionId: changedId } = data as { sessionId: string };
+        if (changedId === sessionId) {
+          load();
+        }
+      },
+    );
 
     return cleanupStatus;
   }, [sessionId]);
 
   if (!session) {
-    return <div className="p-7 text-text-tertiary text-[0.8125rem]">Loading session...</div>;
+    return (
+      <div className="p-7 text-text-tertiary text-[0.8125rem]">Loading session...</div>
+    );
   }
 
-  const statusBadge: Record<string, string> = {
-    pending: 'badge-neutral',
-    active: 'badge-blue',
-    paused: 'badge-gold',
-    completed: 'badge-green',
-    failed: 'badge-red',
-    waiting_approval: 'badge-gold',
-  };
+  const title = session.description || `Session ${session.id.slice(0, 8)}`;
 
   return (
     <div className="flex flex-col h-full">
+      {/* Page Header */}
       <div className="page-header">
         <button
           onClick={onBack}
@@ -231,9 +316,9 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
         </button>
         <div className="flex items-center gap-3">
           <Folders size={18} strokeWidth={1.75} className="text-accent-ember" />
-          <h2>Session {session.id.slice(0, 8)}</h2>
+          <h2>{title}</h2>
           <span className={`badge ${statusBadge[session.status] || 'badge-neutral'}`}>
-            {session.status === 'waiting_approval' ? 'Awaiting Approval' : session.status}
+            {statusLabel[session.status] || session.status}
           </span>
           {sessionApprovals.length > 0 && (
             <span className="badge badge-red flex items-center gap-1">
@@ -242,41 +327,78 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
             </span>
           )}
           {session.current_phase !== null && (
-            <span className="text-[0.6875rem] text-text-tertiary">
+            <span className="text-[0.6875rem] text-text-tertiary font-mono">
               Phase {session.current_phase + 1}
             </span>
           )}
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="btn-ghost flex items-center gap-1.5 text-status-failed"
+            >
+              <Trash2 size={13} strokeWidth={2} />
+              <span className="text-[0.75rem]">Delete</span>
+            </button>
+          </div>
         </div>
       </div>
 
+      {/* Content */}
       <div className="flex-1 overflow-auto p-7 scrollbar-thin">
         <div className="content-area">
+          {/* Session metadata bar */}
+          <div className="flex items-center gap-4 mb-8 text-[0.6875rem] text-text-tertiary font-mono">
+            <span className="flex items-center gap-1.5">
+              <Clock size={10} strokeWidth={2} />
+              Created {new Date(session.created_at).toLocaleString()}
+            </span>
+            {session.completed_at && (
+              <span className="flex items-center gap-1.5">
+                Completed {new Date(session.completed_at).toLocaleString()}
+              </span>
+            )}
+            <span className="opacity-40">{session.id.slice(0, 12)}</span>
+          </div>
+
+          {/* Context */}
           {session.context && (
-            <div className="card card-static p-6 mb-7">
-              <div className="markdown-body text-[0.875rem]">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={secureMarkdownComponents}>
-                  {session.context}
-                </ReactMarkdown>
+            <div className="mb-10">
+              <SectionHeader icon={MessageSquareText} label="Context" />
+              <div className="card card-static p-6">
+                <div className="markdown-body text-[0.875rem]">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={secureMarkdownComponents}
+                  >
+                    {session.context}
+                  </ReactMarkdown>
+                </div>
               </div>
             </div>
           )}
 
-          {/* Waiting for gate approval indicator */}
+          {/* Gate approval waiting indicator */}
           {session.status === 'waiting_approval' && sessionApprovals.length === 0 && (
-            <div className="card card-static p-5 mb-7 flex items-center gap-3" style={{ borderLeft: '3px solid var(--color-accent-gold)' }}>
+            <div
+              className="card card-static p-5 mb-10 flex items-center gap-3"
+              style={{ borderLeft: '3px solid var(--color-accent-gold)' }}
+            >
               <span className="status-dot status-dot-waiting_approval" />
-              <span className="text-[0.875rem] text-accent-gold">Waiting for gate approval</span>
+              <span className="text-[0.875rem] text-accent-gold">
+                Waiting for gate approval
+              </span>
             </div>
           )}
 
-          {/* Pending approvals for this session */}
+          {/* Pending Approvals */}
           {sessionApprovals.length > 0 && (
-            <div className="mb-7">
-              <h3 className="text-[0.75rem] font-semibold tracking-[0.04em] uppercase text-text-tertiary mb-4 flex items-center gap-2">
-                <ShieldAlert size={13} strokeWidth={2} className="text-accent-ember" />
-                Pending Approvals
-              </h3>
-              <div className="stagger-children">
+            <div className="mb-10">
+              <SectionHeader
+                icon={ShieldAlert}
+                label="Pending Approvals"
+                count={sessionApprovals.length}
+              />
+              <div className="flex flex-col gap-4 stagger-children">
                 {sessionApprovals.map((approval) => (
                   <ApprovalCard
                     key={approval.id}
@@ -288,48 +410,67 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
             </div>
           )}
 
-          <div className="flex gap-7">
+          {/* Agents + Decisions two-column */}
+          <div className="grid grid-cols-2 gap-10 mb-10">
             {/* Agents */}
-            <div className="flex-1">
-              <h3 className="text-[0.75rem] font-semibold tracking-[0.04em] uppercase text-text-tertiary mb-4">
-                Agents
-              </h3>
-              <div className="stagger-children">
+            <div className="min-w-0">
+              <SectionHeader icon={Bot} label="Agents" count={session.agents.length} />
+              <div className="flex flex-col gap-3 stagger-children">
                 {session.agents.map((agent) => (
-                  <div key={agent.id} className="card card-static p-5 mb-3 flex items-center gap-4">
-                    <span className={`status-dot status-dot-${agent.status}`} />
-                    <div>
-                      <div className="text-[0.875rem] text-text-primary font-medium">
+                  <div
+                    key={agent.id}
+                    className="card card-static p-5 flex items-start gap-4"
+                  >
+                    <span
+                      className={`status-dot status-dot-${agent.status} mt-1.5`}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[0.875rem] text-text-primary font-medium truncate mb-2">
                         {agent.name}
                       </div>
-                      <div className="text-[0.75rem] text-text-tertiary mt-0.5">
+                      <div className="flex items-center gap-3">
                         <span
-                          className={`badge ${agent.status === 'running' ? 'badge-blue' : agent.status === 'completed' ? 'badge-green' : 'badge-neutral'}`}
+                          className={`badge ${agentStatusBadge[agent.status] || 'badge-neutral'}`}
                         >
                           {agent.status}
+                        </span>
+                        <span className="text-[0.625rem] text-text-tertiary font-mono flex items-center gap-1">
+                          <Clock size={8} strokeWidth={2} />
+                          {new Date(agent.created_at).toLocaleTimeString()}
                         </span>
                       </div>
                     </div>
                   </div>
                 ))}
                 {session.agents.length === 0 && (
-                  <div className="text-text-tertiary text-[0.875rem]">No agents</div>
+                  <div className="text-text-tertiary text-[0.8125rem] py-4">
+                    No agents
+                  </div>
                 )}
               </div>
             </div>
 
             {/* Decisions */}
-            <div className="flex-1">
-              <h3 className="text-[0.75rem] font-semibold tracking-[0.04em] uppercase text-text-tertiary mb-4">
-                Decisions
-              </h3>
-              <div className="stagger-children">
+            <div className="min-w-0">
+              <SectionHeader
+                icon={Lightbulb}
+                label="Decisions"
+                count={session.decisions.length}
+              />
+              <div className="flex flex-col gap-3 stagger-children">
                 {session.decisions.map((decision) => (
-                  <div key={decision.id} className="card card-static p-4 mb-3">
-                    <div className="text-[0.875rem] text-text-primary mb-2">
+                  <div key={decision.id} className="card card-static p-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span
+                        className={`badge ${decision.type === 'decision' ? 'badge-blue' : 'badge-ember'}`}
+                      >
+                        {decision.type}
+                      </span>
+                    </div>
+                    <div className="text-[0.8125rem] text-text-primary leading-relaxed mb-3">
                       {decision.question}
                     </div>
-                    <div className="markdown-body text-[0.8125rem] text-accent-gold">
+                    <div className="markdown-body text-[0.8125rem] text-accent-gold pl-3 border-l-2 border-accent-gold/20">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         components={secureMarkdownComponents}
@@ -337,17 +478,12 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
                         {decision.choice}
                       </ReactMarkdown>
                     </div>
-                    <div className="mt-2">
-                      <span
-                        className={`badge ${decision.type === 'decision' ? 'badge-blue' : 'badge-ember'}`}
-                      >
-                        {decision.type}
-                      </span>
-                    </div>
                   </div>
                 ))}
                 {session.decisions.length === 0 && (
-                  <div className="text-text-tertiary text-[0.875rem]">No decisions</div>
+                  <div className="text-text-tertiary text-[0.8125rem] py-4">
+                    No decisions
+                  </div>
                 )}
               </div>
             </div>
@@ -355,12 +491,13 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
 
           {/* Artifacts */}
           {session.artifacts && session.artifacts.length > 0 && (
-            <div className="mt-7">
-              <h3 className="text-[0.75rem] font-semibold tracking-[0.04em] uppercase text-text-tertiary mb-4 flex items-center gap-2">
-                <FileText size={13} strokeWidth={2} className="text-accent-ember" />
-                Artifacts
-              </h3>
-              <div className="stagger-children">
+            <div className="mb-10">
+              <SectionHeader
+                icon={FileText}
+                label="Artifacts"
+                count={session.artifacts.length}
+              />
+              <div className="flex flex-col gap-3 stagger-children">
                 {session.artifacts.map((artifact) => (
                   <ArtifactCard
                     key={artifact.id}
@@ -374,12 +511,15 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
           )}
 
           {/* Actions */}
-          <div className="mt-6 flex gap-2 pb-4">
+          <div className="flex items-center gap-3 pt-4 pb-6 border-t border-border-subtle">
             {session.status === 'active' && (
               <button
                 onClick={async () => {
                   await window.athanor.invoke('session:pause' as never, sessionId);
-                  const result = await window.athanor.invoke('session:get' as never, sessionId);
+                  const result = await window.athanor.invoke(
+                    'session:get' as never,
+                    sessionId,
+                  );
                   setSession(result as SessionData);
                 }}
                 className="btn-secondary flex items-center gap-1.5"
@@ -392,7 +532,10 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
               <button
                 onClick={async () => {
                   await window.athanor.invoke('session:resume' as never, sessionId);
-                  const result = await window.athanor.invoke('session:get' as never, sessionId);
+                  const result = await window.athanor.invoke(
+                    'session:get' as never,
+                    sessionId,
+                  );
                   setSession(result as SessionData);
                 }}
                 className="btn-primary flex items-center gap-1.5"
@@ -404,6 +547,15 @@ export function SessionDetail({ sessionId, onBack }: SessionDetailProps): React.
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete Session"
+        description={`"${title}" will be permanently deleted.`}
+        warning="All agents, messages, artifacts, decisions, and approvals in this session will be lost."
+        onConfirm={handleDeleteSession}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </div>
   );
 }

@@ -245,7 +245,24 @@ export function registerWorkflowHandlers(
 
   // Session handlers
   registerSecureIpcHandler(mainWindow, 'session:list', z.tuple([]), async () => {
-    return db.selectFrom('sessions').selectAll().orderBy('created_at', 'desc').execute();
+    return db
+      .selectFrom('sessions')
+      .leftJoin('workflows', 'workflows.id', 'sessions.workflow_id')
+      .select([
+        'sessions.id',
+        'sessions.user_id',
+        'sessions.workspace_id',
+        'sessions.workflow_id',
+        'sessions.status',
+        'sessions.current_phase',
+        'sessions.context',
+        'sessions.description',
+        'sessions.created_at',
+        'sessions.completed_at',
+        'workflows.name as workflow_name',
+      ])
+      .orderBy('sessions.created_at', 'desc')
+      .execute();
   });
 
   registerSecureIpcHandler(mainWindow, 'session:get', z.tuple([uuidSchema]), async (_event, id) => {
