@@ -54,6 +54,7 @@ export interface SessionTable {
   status: Generated<string>;
   current_phase: number | null;
   context: string | null;
+  git_strategy: string | null;
   created_at: Generated<string>;
   completed_at: string | null;
 }

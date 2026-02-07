@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { TransparentMarkdownEditor } from '../shared/TransparentMarkdownEditor';
+import { GitStrategyPicker } from '../shared/GitStrategyPicker';
 import { ChevronRight, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import type { CliAgentType, PhasePermissionMode } from '../../../shared/types/domain';
+import type { GitStrategy } from '../../../shared/types/workflow-phase';
 
 export interface PhaseData {
   id?: string;
@@ -13,6 +15,7 @@ export interface PhaseData {
   approval: string;
   permission_mode: PhasePermissionMode;
   agent_type: CliAgentType;
+  git_strategy: GitStrategy | null;
 }
 
 interface PhaseEditorProps {
@@ -75,6 +78,13 @@ export function PhaseEditor({
         >
           {phase.agent_type === 'codex' ? 'Codex' : 'Claude'}
         </span>
+        {phase.git_strategy && phase.git_strategy.mode !== 'worktree' && (
+          <span className="badge badge-violet" style={{ flexShrink: 0 }}>
+            {phase.git_strategy.mode === 'main'
+              ? 'Main'
+              : `Branch: ${phase.git_strategy.branch}`}
+          </span>
+        )}
         <span
           className="phase-accordion-remove"
           role="button"
@@ -154,6 +164,15 @@ export function PhaseEditor({
                   </select>
                 </div>
               </div>
+            </div>
+
+            <div className="phase-field">
+              <label className="phase-label">Git Strategy</label>
+              <GitStrategyPicker
+                value={phase.git_strategy}
+                onChange={(v) => onChange({ ...phase, git_strategy: v })}
+                allowInherit
+              />
             </div>
 
             <div className="phase-field">

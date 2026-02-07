@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { TransparentMarkdownEditor } from '../shared/TransparentMarkdownEditor';
+import { GitStrategyPicker } from '../shared/GitStrategyPicker';
 import { Plus, Rocket, X } from 'lucide-react';
+import type { GitStrategy } from '../../../shared/types/workflow-phase';
 
 interface Workspace {
   id: string;
@@ -25,6 +27,8 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
   const [selectedWorkflow, setSelectedWorkflow] = useState('');
   const [description, setDescription] = useState('');
   const [context, setContext] = useState('');
+  const [gitStrategy, setGitStrategy] = useState<GitStrategy | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
@@ -47,6 +51,7 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
   const handleLaunch = async () => {
     if (!selectedWorkspace || !selectedWorkflow) return;
     setLaunching(true);
+    setError(null);
     try {
       const user = (await window.athanor.invoke('db:get-user' as never)) as { id: string };
       await window.athanor.invoke('session:start' as never, {
@@ -55,13 +60,16 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
         workflowId: selectedWorkflow,
         description: description || undefined,
         context: context || undefined,
+        gitStrategy: gitStrategy || undefined,
       });
       setDescription('');
       setContext('');
+      setGitStrategy(null);
       setExpanded(false);
       onLaunched();
     } catch (err) {
-      console.error('Failed to launch session:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
     } finally {
       setLaunching(false);
     }
@@ -161,6 +169,21 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
           fontFamily: 'var(--font-mono)',
         }}
       />
+
+      <div className="mb-3">
+        <div className="text-[0.6875rem] text-text-tertiary mb-1.5">Git Strategy</div>
+        <GitStrategyPicker
+          value={gitStrategy}
+          onChange={setGitStrategy}
+          workspaceId={selectedWorkspace || undefined}
+        />
+      </div>
+
+      {error && (
+        <div className="text-[0.75rem] text-status-failed mb-3 p-2.5 rounded-md bg-surface-2 border border-border-default">
+          {error}
+        </div>
+      )}
 
       <div className="flex gap-2">
         <button

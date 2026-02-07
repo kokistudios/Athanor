@@ -1,8 +1,12 @@
 import type { BrowserWindow } from 'electron';
 import type { Kysely } from 'kysely';
 import { z } from 'zod';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import type { Database } from '../../shared/types/database';
 import { registerSecureIpcHandler } from './security';
+
+const execFileAsync = promisify(execFile);
 
 const uuidSchema = z.string().uuid();
 const optionalStringSchema = z.string().max(4096).optional();
@@ -61,6 +65,15 @@ export function registerDbHandlers(db: Kysely<Database>, mainWindow: BrowserWind
   });
 
   registerSecureIpcHandler(mainWindow, 'db:add-repo', addRepoArgsSchema, async (_event, opts) => {
+    // Validate that the path is a git repository
+    try {
+      await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd: opts.localPath });
+    } catch {
+      throw new Error(
+        `"${opts.localPath}" is not a git repository. Please select a folder that contains a .git directory.`,
+      );
+    }
+
     const id = crypto.randomUUID();
     await db
       .insertInto('repos')

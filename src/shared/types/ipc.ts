@@ -40,7 +40,8 @@ export type IpcChannel =
   | 'artifact:delete'
   | 'shell:open-external'
   | 'shell:pick-folder'
-  | 'window:open-spec-popout';
+  | 'window:open-spec-popout'
+  | 'repo:list-branches';
 
 export type PushChannel =
   | 'agent:token'

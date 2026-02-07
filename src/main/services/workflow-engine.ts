@@ -1,12 +1,16 @@
 import { EventEmitter } from 'events';
 import * as crypto from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import type { Kysely } from 'kysely';
+
+const execFileAsync = promisify(execFile);
 import type { Database } from '../../shared/types/database';
 import type { AgentManager } from './agent-manager';
 import type { ApprovalRouter } from './approval-router';
 import type { WorktreeManager } from './worktree-manager';
 import type { AthanorConfig } from '../../shared/types/config';
-import type { WorkflowPhaseConfig } from '../../shared/types/workflow-phase';
+import type { GitStrategy, WorkflowPhaseConfig } from '../../shared/types/workflow-phase';
 import { buildSystemPreamble } from '../prompts/system-preamble';
 
 export interface StartSessionOptions {
@@ -15,6 +19,7 @@ export interface StartSessionOptions {
   workflowId: string;
   context?: string;
   description?: string;
+  gitStrategy?: GitStrategy;
 }
 
 export class WorkflowEngine extends EventEmitter {
@@ -66,6 +71,25 @@ export class WorkflowEngine extends EventEmitter {
   async startSession(opts: StartSessionOptions): Promise<string> {
     const sessionId = crypto.randomUUID();
 
+    // Validate repo is a git repository before creating any rows
+    const workspace = await this.db
+      .selectFrom('workspaces')
+      .select('repo_id')
+      .where('id', '=', opts.workspaceId)
+      .executeTakeFirstOrThrow();
+    const repo = await this.db
+      .selectFrom('repos')
+      .select(['name', 'local_path'])
+      .where('id', '=', workspace.repo_id)
+      .executeTakeFirstOrThrow();
+    try {
+      await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd: repo.local_path });
+    } catch {
+      throw new Error(
+        `Repo "${repo.name}" at "${repo.local_path}" is not a git repository. Update the repo path in workspace settings.`,
+      );
+    }
+
     // Look up the workflow phases
     const phases = await this.db
       .selectFrom('workflow_phases')
@@ -90,6 +114,7 @@ export class WorkflowEngine extends EventEmitter {
         status: 'active',
         current_phase: phases[0].ordinal,
         context: opts.context || null,
+        git_strategy: opts.gitStrategy ? JSON.stringify(opts.gitStrategy) : null,
       })
       .execute();
 
@@ -204,6 +229,15 @@ export class WorkflowEngine extends EventEmitter {
       .where('id', '=', workspace.repo_id)
       .executeTakeFirstOrThrow();
 
+    // Validate that repo path is a git repository
+    try {
+      await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd: repo.local_path });
+    } catch {
+      throw new Error(
+        `Repo "${repo.name}" at "${repo.local_path}" is not a git repository. Update the repo path in workspace settings.`,
+      );
+    }
+
     // Build shared system prompt
     const systemPrompt = buildSystemPreamble({
       sessionId,
@@ -212,12 +246,6 @@ export class WorkflowEngine extends EventEmitter {
       repoName: repo.name,
       repoPath: repo.local_path,
     });
-
-    // Create worktree
-    const { dir, branch } = await this.worktreeManager.createWorktree(
-      repo.local_path,
-      `${phase.name}-${sessionId.slice(0, 8)}`,
-    );
 
     // Build prompt with context
     let prompt = phase.prompt_template;
@@ -260,19 +288,101 @@ export class WorkflowEngine extends EventEmitter {
       phaseConfig.permission_mode || 'bypassPermissions';
     const agentType = phaseConfig.agent_type || 'claude';
 
+    // Resolve git strategy: phase config > session default > worktree fallback
+    const gitStrategy = this.resolveGitStrategy(phaseConfig, session.git_strategy);
+    const taskName = `${phase.name}-${sessionId.slice(0, 8)}`;
+
+    let workingDir: string;
+    let worktreePath: string | undefined;
+    let branch: string | undefined;
+
+    switch (gitStrategy.mode) {
+      case 'worktree': {
+        const wt = await this.worktreeManager.createWorktree(repo.local_path, taskName);
+        workingDir = wt.dir;
+        worktreePath = wt.dir;
+        branch = wt.branch;
+        break;
+      }
+      case 'main': {
+        await this.guardInPlaceConflict(session.workspace_id, sessionId);
+        workingDir = repo.local_path;
+        break;
+      }
+      case 'branch': {
+        if (gitStrategy.isolation === 'worktree') {
+          const wt = await this.worktreeManager.createWorktreeFromBranch(
+            repo.local_path,
+            gitStrategy.branch,
+            taskName,
+            gitStrategy.create,
+          );
+          workingDir = wt.dir;
+          worktreePath = wt.dir;
+          branch = wt.branch;
+        } else {
+          await this.guardInPlaceConflict(session.workspace_id, sessionId);
+          await this.worktreeManager.checkoutBranch(
+            repo.local_path,
+            gitStrategy.branch,
+            gitStrategy.create,
+          );
+          workingDir = repo.local_path;
+          branch = gitStrategy.branch;
+        }
+        break;
+      }
+    }
+
     await this.agentManager.spawnAgent({
       sessionId,
       phaseId: phase.id,
       name: phase.name,
       prompt,
       systemPrompt,
-      worktreePath: dir,
+      workingDir,
+      worktreePath,
       branch,
       allowedTools,
       agents,
       permissionMode,
       agentType,
     });
+  }
+
+  private resolveGitStrategy(
+    phaseConfig: WorkflowPhaseConfig,
+    sessionGitStrategy: string | null,
+  ): GitStrategy {
+    if (phaseConfig.git_strategy) return phaseConfig.git_strategy;
+    if (sessionGitStrategy) {
+      try {
+        return JSON.parse(sessionGitStrategy) as GitStrategy;
+      } catch {
+        // ignore malformed session git strategy
+      }
+    }
+    return { mode: 'worktree' };
+  }
+
+  private async guardInPlaceConflict(workspaceId: string, currentSessionId: string): Promise<void> {
+    // Check for running agents in the same workspace with no worktree (main/in-place mode)
+    const conflicting = await this.db
+      .selectFrom('agents')
+      .innerJoin('sessions', 'sessions.id', 'agents.session_id')
+      .select('agents.id')
+      .where('sessions.workspace_id', '=', workspaceId)
+      .where('agents.session_id', '!=', currentSessionId)
+      .where('agents.worktree_path', 'is', null)
+      .where('agents.status', 'in', ['spawning', 'running', 'waiting'])
+      .limit(1)
+      .executeTakeFirst();
+
+    if (conflicting) {
+      throw new Error(
+        'Another agent is already running in-place in this workspace. Use worktree isolation or wait for it to complete.',
+      );
+    }
   }
 
   private async handlePhaseComplete(agentId: string): Promise<void> {

@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { PhaseEditor, type PhaseData } from './PhaseEditor';
 import { ArrowLeft, Plus, Save, Workflow, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
-import type { WorkflowPhaseConfig } from '../../../shared/types/workflow-phase';
-import { CLI_AGENT_TYPES } from '../../../shared/types/domain';
+import type { GitStrategy, WorkflowPhaseConfig } from '../../../shared/types/workflow-phase';
+import { CLI_AGENT_TYPES, GIT_STRATEGY_MODES } from '../../../shared/types/domain';
 
 const CLI_AGENT_TYPE_SET = new Set<string>(CLI_AGENT_TYPES);
+const GIT_STRATEGY_MODE_SET = new Set<string>(GIT_STRATEGY_MODES);
 
-function parsePhaseConfig(config: string | null): Required<Pick<PhaseData, 'permission_mode' | 'agent_type'>> {
-  if (!config) return { permission_mode: 'default', agent_type: 'claude' };
+function parsePhaseConfig(config: string | null): Required<Pick<PhaseData, 'permission_mode' | 'agent_type' | 'git_strategy'>> {
+  if (!config) return { permission_mode: 'default', agent_type: 'claude', git_strategy: null };
   try {
     const parsed = JSON.parse(config) as WorkflowPhaseConfig;
     const permission_mode =
@@ -17,9 +18,13 @@ function parsePhaseConfig(config: string | null): Required<Pick<PhaseData, 'perm
       typeof parsed.agent_type === 'string' && CLI_AGENT_TYPE_SET.has(parsed.agent_type)
         ? parsed.agent_type
         : 'claude';
-    return { permission_mode, agent_type };
+    let git_strategy: GitStrategy | null = null;
+    if (parsed.git_strategy && GIT_STRATEGY_MODE_SET.has(parsed.git_strategy.mode)) {
+      git_strategy = parsed.git_strategy;
+    }
+    return { permission_mode, agent_type, git_strategy };
   } catch {
-    return { permission_mode: 'default', agent_type: 'claude' };
+    return { permission_mode: 'default', agent_type: 'claude', git_strategy: null };
   }
 }
 
@@ -77,6 +82,7 @@ export function WorkflowEditor({
             approval: p.approval,
             permission_mode: phaseConfig.permission_mode,
             agent_type: phaseConfig.agent_type,
+            git_strategy: phaseConfig.git_strategy,
           };
         }),
       );
@@ -96,6 +102,7 @@ export function WorkflowEditor({
         approval: 'none',
         permission_mode: 'default',
         agent_type: 'claude',
+        git_strategy: null,
       },
     ]);
     setDirty(true);
@@ -115,6 +122,7 @@ export function WorkflowEditor({
         config: {
           permission_mode: p.permission_mode,
           agent_type: p.agent_type,
+          ...(p.git_strategy ? { git_strategy: p.git_strategy } : {}),
         },
       }));
 

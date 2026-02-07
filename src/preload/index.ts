@@ -41,6 +41,7 @@ const ALLOWED_REQUEST_CHANNELS = new Set<IpcChannel>([
   'shell:open-external',
   'shell:pick-folder',
   'window:open-spec-popout',
+  'repo:list-branches',
 ]);
 
 const ALLOWED_PUSH_CHANNELS = new Set<PushChannel>([

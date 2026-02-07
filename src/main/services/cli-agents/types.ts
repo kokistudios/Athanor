@@ -11,7 +11,7 @@ export interface McpServerDefinition {
 export interface BuildSpawnSpecOptions {
   prompt: string;
   systemPrompt?: string;
-  worktreePath: string;
+  workingDir: string;
   permissionMode: string;
   allowedTools?: string[] | null;
   agents?: Record<string, unknown>;

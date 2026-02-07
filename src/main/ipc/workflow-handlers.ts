@@ -3,16 +3,27 @@ import type { Kysely } from 'kysely';
 import { z } from 'zod';
 import type { Database } from '../../shared/types/database';
 import type { ServiceRegistry } from '../services/service-registry';
-import { CLI_AGENT_TYPES, PHASE_PERMISSION_MODES } from '../../shared/types/domain';
+import { CLI_AGENT_TYPES, GIT_BRANCH_ISOLATIONS, PHASE_PERMISSION_MODES } from '../../shared/types/domain';
 import { registerSecureIpcHandler } from './security';
 
 const uuidSchema = z.string().uuid();
 const permissionModeSchema = z.enum(PHASE_PERMISSION_MODES);
 const cliAgentTypeSchema = z.enum(CLI_AGENT_TYPES);
+const gitStrategySchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('worktree') }),
+  z.object({ mode: z.literal('main') }),
+  z.object({
+    mode: z.literal('branch'),
+    branch: z.string().min(1).max(256),
+    isolation: z.enum(GIT_BRANCH_ISOLATIONS),
+    create: z.boolean(),
+  }),
+]);
 const workflowPhaseConfigSchema = z
   .object({
     permission_mode: permissionModeSchema.optional(),
     agent_type: cliAgentTypeSchema.optional(),
+    git_strategy: gitStrategySchema.optional(),
   })
   .strict();
 
@@ -69,6 +80,7 @@ const sessionStartArgsSchema = z.tuple([
       workflowId: uuidSchema,
       context: z.string().max(200_000).optional(),
       description: z.string().max(1000).optional(),
+      gitStrategy: gitStrategySchema.optional(),
     })
     .strict(),
 ]);
@@ -305,7 +317,14 @@ export function registerWorkflowHandlers(
     'session:start',
     sessionStartArgsSchema,
     async (_event, opts) => {
-      const sessionId = await services.workflowEngine.startSession(opts);
+      const sessionId = await services.workflowEngine.startSession({
+        userId: opts.userId,
+        workspaceId: opts.workspaceId,
+        workflowId: opts.workflowId,
+        context: opts.context,
+        description: opts.description,
+        gitStrategy: opts.gitStrategy,
+      });
       return db
         .selectFrom('sessions')
         .selectAll()
@@ -413,6 +432,31 @@ export function registerWorkflowHandlers(
       }
 
       return { success: true };
+    },
+  );
+
+  // Repo branch listing (for git strategy picker)
+  registerSecureIpcHandler(
+    mainWindow,
+    'repo:list-branches',
+    z.tuple([uuidSchema]),
+    async (_event, workspaceId) => {
+      try {
+        const workspace = await db
+          .selectFrom('workspaces')
+          .select('repo_id')
+          .where('id', '=', workspaceId)
+          .executeTakeFirstOrThrow();
+        const repo = await db
+          .selectFrom('repos')
+          .select('local_path')
+          .where('id', '=', workspace.repo_id)
+          .executeTakeFirstOrThrow();
+        return await services.worktreeManager.listBranches(repo.local_path);
+      } catch {
+        // Repo path may not exist or not be a git repository
+        return [];
+      }
     },
   );
 }

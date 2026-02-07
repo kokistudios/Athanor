@@ -39,5 +39,11 @@ export type DecisionStatus = (typeof DECISION_STATUSES)[number];
 export const DECISION_ORIGINS = ['human', 'agent'] as const;
 export type DecisionOrigin = (typeof DECISION_ORIGINS)[number];
 
+export const GIT_STRATEGY_MODES = ['worktree', 'main', 'branch'] as const;
+export type GitStrategyMode = (typeof GIT_STRATEGY_MODES)[number];
+
+export const GIT_BRANCH_ISOLATIONS = ['worktree', 'in_place'] as const;
+export type GitBranchIsolation = (typeof GIT_BRANCH_ISOLATIONS)[number];
+
 export const ARTIFACT_STATUSES = ['draft', 'final'] as const;
 export type ArtifactStatus = (typeof ARTIFACT_STATUSES)[number];

@@ -36,6 +36,57 @@ export class WorktreeManager {
     });
   }
 
+  async listBranches(repoPath: string): Promise<string[]> {
+    const { stdout } = await execFileAsync('git', ['branch', '--format=%(refname:short)'], {
+      cwd: repoPath,
+    });
+    return stdout
+      .split('\n')
+      .map((b) => b.trim())
+      .filter(Boolean);
+  }
+
+  async createWorktreeFromBranch(
+    repoPath: string,
+    branchName: string,
+    taskName: string,
+    createBranch: boolean,
+  ): Promise<WorktreeInfo> {
+    const shortId = crypto.randomUUID().slice(0, 8);
+    const safeName = taskName.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+    const dir = path.join(this.worktreeBase, `${safeName}-${shortId}`);
+
+    if (createBranch) {
+      await execFileAsync('git', ['worktree', 'add', dir, '-b', branchName], {
+        cwd: repoPath,
+      });
+    } else {
+      await execFileAsync('git', ['worktree', 'add', dir, branchName], {
+        cwd: repoPath,
+      });
+    }
+
+    return { dir, branch: branchName };
+  }
+
+  async checkoutBranch(repoPath: string, branchName: string, create: boolean): Promise<void> {
+    // Check current branch — no-op if already on it
+    try {
+      const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+        cwd: repoPath,
+      });
+      if (stdout.trim() === branchName) return;
+    } catch {
+      // ignore — proceed with checkout
+    }
+
+    if (create) {
+      await execFileAsync('git', ['checkout', '-b', branchName], { cwd: repoPath });
+    } else {
+      await execFileAsync('git', ['checkout', branchName], { cwd: repoPath });
+    }
+  }
+
   async listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
     const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], {
       cwd: repoPath,

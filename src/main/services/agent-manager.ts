@@ -25,7 +25,8 @@ export interface SpawnAgentOptions {
   name: string;
   prompt: string;
   systemPrompt?: string;
-  worktreePath: string;
+  workingDir: string;
+  worktreePath?: string;
   branch?: string;
   allowedTools?: string[] | null;
   agents?: Record<string, unknown>;
@@ -79,7 +80,7 @@ export class AgentManager extends EventEmitter {
         session_id: opts.sessionId,
         phase_id: opts.phaseId,
         name: opts.name,
-        worktree_path: opts.worktreePath,
+        worktree_path: opts.worktreePath || null,
         branch: opts.branch || null,
         claude_session_id: opts.claudeSessionId || null,
         status: 'spawning',
@@ -93,7 +94,7 @@ export class AgentManager extends EventEmitter {
       {
         prompt: opts.prompt,
         systemPrompt: opts.systemPrompt,
-        worktreePath: opts.worktreePath,
+        workingDir: opts.workingDir,
         permissionMode,
         allowedTools: opts.allowedTools,
         agents: opts.agents,
@@ -109,7 +110,7 @@ export class AgentManager extends EventEmitter {
       sessionId: opts.sessionId,
       phaseId: opts.phaseId,
       name: opts.name,
-      worktreePath: opts.worktreePath,
+      workingDir: opts.workingDir,
       agentType,
       adapter,
       spawnSpec,
@@ -124,19 +125,19 @@ export class AgentManager extends EventEmitter {
     sessionId: string;
     phaseId: string;
     name: string;
-    worktreePath: string;
+    workingDir: string;
     agentType: CliAgentType;
     adapter: CliAgentAdapter;
     spawnSpec: CliAgentSpawnSpec;
     initialUserInput?: string;
   }): Promise<void> {
     console.log(
-      `[agent:${opts.name}] Spawning (${opts.agentType}): ${opts.spawnSpec.command} ${opts.spawnSpec.args.slice(0, 8).join(' ')} ... (cwd: ${opts.worktreePath})`,
+      `[agent:${opts.name}] Spawning (${opts.agentType}): ${opts.spawnSpec.command} ${opts.spawnSpec.args.slice(0, 8).join(' ')} ... (cwd: ${opts.workingDir})`,
     );
 
     const detached = process.platform !== 'win32';
     const proc = spawn(opts.spawnSpec.command, opts.spawnSpec.args, {
-      cwd: opts.worktreePath,
+      cwd: opts.workingDir,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached,
       env: opts.spawnSpec.env ? { ...process.env, ...opts.spawnSpec.env } : process.env,
@@ -579,13 +580,13 @@ export class AgentManager extends EventEmitter {
       phaseId: runtime.phaseId,
       name: runtime.name,
       prompt: input,
-      worktreePath: runtime.worktreePath,
+      workingDir: runtime.workingDir,
     });
     const mcpConfigPath = await this.generateMcpConfig(agentId, mcpServer);
     const spawnSpec = runtime.adapter.buildSpawnSpec(
       {
         prompt: input,
-        worktreePath: runtime.worktreePath,
+        workingDir: runtime.workingDir,
         permissionMode: runtime.permissionMode,
         allowedTools: runtime.allowedTools,
         agents: runtime.agents,
@@ -601,7 +602,7 @@ export class AgentManager extends EventEmitter {
       sessionId: runtime.sessionId,
       phaseId: runtime.phaseId,
       name: runtime.name,
-      worktreePath: runtime.worktreePath,
+      workingDir: runtime.workingDir,
       agentType: runtime.agentType,
       adapter: runtime.adapter,
       spawnSpec,
@@ -613,7 +614,7 @@ export class AgentManager extends EventEmitter {
     sessionId: string;
     phaseId: string;
     name: string;
-    worktreePath: string;
+    workingDir: string;
     agentType: CliAgentType;
     adapter: CliAgentAdapter;
     permissionMode: string;
@@ -635,8 +636,25 @@ export class AgentManager extends EventEmitter {
       throw new Error(`Agent ${agentId} is not waiting for input`);
     }
 
-    if (!agent.worktree_path) {
-      throw new Error(`Agent ${agentId} has no worktree path`);
+    // Resolve working directory: use worktree_path if available, otherwise fall back to repo path
+    let workingDir = agent.worktree_path;
+    if (!workingDir) {
+      const session = await this.db
+        .selectFrom('sessions')
+        .select('workspace_id')
+        .where('id', '=', agent.session_id)
+        .executeTakeFirstOrThrow();
+      const workspace = await this.db
+        .selectFrom('workspaces')
+        .select('repo_id')
+        .where('id', '=', session.workspace_id)
+        .executeTakeFirstOrThrow();
+      const repo = await this.db
+        .selectFrom('repos')
+        .select('local_path')
+        .where('id', '=', workspace.repo_id)
+        .executeTakeFirstOrThrow();
+      workingDir = repo.local_path;
     }
 
     const phase = await this.db
@@ -685,7 +703,7 @@ export class AgentManager extends EventEmitter {
       sessionId: agent.session_id,
       phaseId: agent.phase_id,
       name: agent.name,
-      worktreePath: agent.worktree_path,
+      workingDir,
       agentType,
       adapter,
       permissionMode: phaseConfig.permission_mode || 'bypassPermissions',

@@ -13,7 +13,7 @@ export class CodexCliAdapter implements CliAgentAdapter {
   readonly exitsAfterTurn = true;
 
   buildSpawnSpec(opts: BuildSpawnSpecOptions, config: AthanorConfig) {
-    const args: string[] = ['-C', opts.worktreePath];
+    const args: string[] = ['-C', opts.workingDir];
     if (opts.resumeSessionId) {
       args.push('exec', 'resume', opts.resumeSessionId, '--json', '--skip-git-repo-check');
     } else {

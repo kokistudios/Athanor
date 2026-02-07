@@ -1,0 +1,273 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { AlertTriangle } from 'lucide-react';
+import type { GitStrategy } from '../../../shared/types/workflow-phase';
+
+interface GitStrategyPickerProps {
+  value: GitStrategy | null;
+  onChange: (v: GitStrategy | null) => void;
+  workspaceId?: string;
+  allowInherit?: boolean;
+}
+
+type PickerMode = 'inherit' | 'worktree' | 'main' | 'branch';
+
+function strategyToMode(strategy: GitStrategy | null, allowInherit: boolean): PickerMode {
+  if (!strategy) return allowInherit ? 'inherit' : 'worktree';
+  return strategy.mode;
+}
+
+function modeToStrategy(
+  mode: PickerMode,
+  branchState: { branch: string; isolation: 'worktree' | 'in_place'; create: boolean },
+): GitStrategy | null {
+  switch (mode) {
+    case 'inherit':
+      return null;
+    case 'worktree':
+      return { mode: 'worktree' };
+    case 'main':
+      return { mode: 'main' };
+    case 'branch':
+      return {
+        mode: 'branch',
+        branch: branchState.branch,
+        isolation: branchState.isolation,
+        create: branchState.create,
+      };
+  }
+}
+
+export function GitStrategyPicker({
+  value,
+  onChange,
+  workspaceId,
+  allowInherit = false,
+}: GitStrategyPickerProps): React.ReactElement {
+  const [mode, setMode] = useState<PickerMode>(() => strategyToMode(value, allowInherit));
+  const [branch, setBranch] = useState(value?.mode === 'branch' ? value.branch : '');
+  const [isolation, setIsolation] = useState<'worktree' | 'in_place'>(
+    value?.mode === 'branch' ? value.isolation : 'worktree',
+  );
+  const [create, setCreate] = useState(value?.mode === 'branch' ? value.create : true);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Load branch suggestions when workspace changes
+  useEffect(() => {
+    if (!workspaceId) {
+      setSuggestions([]);
+      return;
+    }
+    const loadBranches = async () => {
+      try {
+        const branches = (await window.athanor.invoke(
+          'repo:list-branches' as never,
+          workspaceId,
+        )) as string[];
+        setSuggestions(branches);
+      } catch {
+        setSuggestions([]);
+      }
+    };
+    void loadBranches();
+  }, [workspaceId]);
+
+  const emitChange = useCallback(
+    (m: PickerMode, b: string, iso: 'worktree' | 'in_place', cr: boolean) => {
+      onChange(modeToStrategy(m, { branch: b, isolation: iso, create: cr }));
+    },
+    [onChange],
+  );
+
+  const handleModeChange = (newMode: PickerMode) => {
+    setMode(newMode);
+    emitChange(newMode, branch, isolation, create);
+  };
+
+  const handleBranchChange = (newBranch: string) => {
+    setBranch(newBranch);
+    emitChange(mode, newBranch, isolation, create);
+  };
+
+  const handleIsolationChange = (newIsolation: 'worktree' | 'in_place') => {
+    setIsolation(newIsolation);
+    emitChange(mode, branch, newIsolation, create);
+  };
+
+  const handleCreateChange = (newCreate: boolean) => {
+    setCreate(newCreate);
+    emitChange(mode, branch, isolation, newCreate);
+  };
+
+  const filteredSuggestions = branch
+    ? suggestions.filter((s) => s.toLowerCase().includes(branch.toLowerCase()) && s !== branch)
+    : suggestions;
+
+  return (
+    <div>
+      <div className="phase-select-wrap">
+        <select
+          value={mode}
+          onChange={(e) => handleModeChange(e.target.value as PickerMode)}
+          className="phase-select"
+        >
+          {allowInherit && <option value="inherit">Inherit</option>}
+          <option value="worktree">Worktree (isolated)</option>
+          <option value="main">Main (in-place)</option>
+          <option value="branch">Named branch</option>
+        </select>
+      </div>
+
+      {mode === 'branch' && (
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ position: 'relative' }}>
+            <input
+              type="text"
+              value={branch}
+              onChange={(e) => handleBranchChange(e.target.value)}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+              placeholder="Branch name"
+              className="phase-input"
+            />
+            {showSuggestions && filteredSuggestions.length > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  zIndex: 50,
+                  maxHeight: 160,
+                  overflowY: 'auto',
+                  background: 'var(--color-surface-2)',
+                  border: '1px solid var(--color-border-default)',
+                  borderRadius: 6,
+                  marginTop: 2,
+                }}
+              >
+                {filteredSuggestions.slice(0, 20).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      handleBranchChange(s);
+                      setCreate(false);
+                      emitChange(mode, s, isolation, false);
+                      setShowSuggestions(false);
+                    }}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '5px 10px',
+                      fontSize: '0.8125rem',
+                      color: 'var(--color-text-secondary)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                    }}
+                    className="hover:bg-surface-3"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: '0.75rem',
+                color: 'var(--color-text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={create}
+                onChange={(e) => handleCreateChange(e.target.checked)}
+              />
+              Create new branch
+            </label>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: '0.75rem',
+                color: 'var(--color-text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="radio"
+                name="branch-isolation"
+                checked={isolation === 'worktree'}
+                onChange={() => handleIsolationChange('worktree')}
+              />
+              Worktree
+            </label>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: '0.75rem',
+                color: 'var(--color-text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="radio"
+                name="branch-isolation"
+                checked={isolation === 'in_place'}
+                onChange={() => handleIsolationChange('in_place')}
+              />
+              In-place
+            </label>
+          </div>
+
+          {isolation === 'in_place' && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: '0.6875rem',
+                color: 'var(--color-status-failed)',
+              }}
+            >
+              <AlertTriangle size={12} />
+              Runs directly in your repo. Only one in-place agent per workspace.
+            </div>
+          )}
+        </div>
+      )}
+
+      {mode === 'main' && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: '0.6875rem',
+            color: 'var(--color-status-failed)',
+            marginTop: 6,
+          }}
+        >
+          <AlertTriangle size={12} />
+          Runs directly in your repo on the current branch.
+        </div>
+      )}
+    </div>
+  );
+}
