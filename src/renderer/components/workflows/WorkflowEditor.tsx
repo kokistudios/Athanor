@@ -2,14 +2,24 @@ import React, { useState, useEffect } from 'react';
 import { PhaseEditor, type PhaseData } from './PhaseEditor';
 import { ArrowLeft, Plus, Save, Workflow, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
+import type { WorkflowPhaseConfig } from '../../../shared/types/workflow-phase';
+import { CLI_AGENT_TYPES } from '../../../shared/types/domain';
 
-function parsePermissionMode(config: string | null): PhaseData['permission_mode'] {
-  if (!config) return 'default';
+const CLI_AGENT_TYPE_SET = new Set<string>(CLI_AGENT_TYPES);
+
+function parsePhaseConfig(config: string | null): Required<Pick<PhaseData, 'permission_mode' | 'agent_type'>> {
+  if (!config) return { permission_mode: 'default', agent_type: 'claude' };
   try {
-    const parsed = JSON.parse(config) as { permission_mode?: unknown };
-    return parsed.permission_mode === 'bypassPermissions' ? 'bypassPermissions' : 'default';
+    const parsed = JSON.parse(config) as WorkflowPhaseConfig;
+    const permission_mode =
+      parsed.permission_mode === 'bypassPermissions' ? 'bypassPermissions' : 'default';
+    const agent_type =
+      typeof parsed.agent_type === 'string' && CLI_AGENT_TYPE_SET.has(parsed.agent_type)
+        ? parsed.agent_type
+        : 'claude';
+    return { permission_mode, agent_type };
   } catch {
-    return 'default';
+    return { permission_mode: 'default', agent_type: 'claude' };
   }
 }
 
@@ -31,6 +41,7 @@ export function WorkflowEditor({
   const [phases, setPhases] = useState<PhaseData[]>([]);
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [dirty, setDirty] = useState(!workflowId);
 
   useEffect(() => {
     if (!workflowId) return;
@@ -55,15 +66,19 @@ export function WorkflowEditor({
       setName(result.name);
       setDescription(result.description || '');
       setPhases(
-        result.phases.map((p) => ({
-          id: p.id,
-          name: p.name,
-          prompt_template: p.prompt_template,
-          allowed_tools: p.allowed_tools ? JSON.parse(p.allowed_tools) : null,
-          agents: p.agents ? JSON.parse(p.agents) : {},
-          approval: p.approval,
-          permission_mode: parsePermissionMode(p.config),
-        })),
+        result.phases.map((p) => {
+          const phaseConfig = parsePhaseConfig(p.config);
+          return {
+            id: p.id,
+            name: p.name,
+            prompt_template: p.prompt_template,
+            allowed_tools: p.allowed_tools ? JSON.parse(p.allowed_tools) : null,
+            agents: p.agents ? JSON.parse(p.agents) : {},
+            approval: p.approval,
+            permission_mode: phaseConfig.permission_mode,
+            agent_type: phaseConfig.agent_type,
+          };
+        }),
       );
     };
 
@@ -80,8 +95,10 @@ export function WorkflowEditor({
         agents: {},
         approval: 'none',
         permission_mode: 'default',
+        agent_type: 'claude',
       },
     ]);
+    setDirty(true);
   };
 
   const handleSave = async () => {
@@ -97,6 +114,7 @@ export function WorkflowEditor({
         approval: p.approval,
         config: {
           permission_mode: p.permission_mode,
+          agent_type: p.agent_type,
         },
       }));
 
@@ -150,16 +168,22 @@ export function WorkflowEditor({
           <Workflow size={18} strokeWidth={1.75} className="text-accent-ember" />
           <h2>{workflowId ? 'Edit Workflow' : 'New Workflow'}</h2>
           {workflowId && (
-            <div className="ml-auto flex items-center gap-1">
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                className="btn-ghost flex items-center gap-1.5 text-status-failed"
-              >
-                <Trash2 size={13} strokeWidth={2} />
-                <span className="text-[0.75rem]">Delete</span>
-              </button>
-            </div>
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="btn-ghost flex items-center gap-1.5 text-status-failed"
+            >
+              <Trash2 size={13} strokeWidth={2} />
+              <span className="text-[0.75rem]">Delete</span>
+            </button>
           )}
+          <button
+            onClick={handleSave}
+            disabled={saving || !name.trim() || !dirty}
+            className="ml-auto btn-ghost flex items-center gap-1.5 text-accent-ember"
+          >
+            <Save size={13} strokeWidth={2} />
+            <span className="text-[0.75rem]">{saving ? 'Saving...' : 'Save'}</span>
+          </button>
         </div>
       </div>
 
@@ -169,7 +193,7 @@ export function WorkflowEditor({
             <input
               type="text"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => { setName(e.target.value); setDirty(true); }}
               placeholder="Workflow name"
               className="input-base w-full mb-2"
               style={{ fontSize: '0.9375rem' }}
@@ -177,7 +201,7 @@ export function WorkflowEditor({
             <input
               type="text"
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => { setDescription(e.target.value); setDirty(true); }}
               placeholder="Description"
               className="input-base w-full"
             />
@@ -213,8 +237,9 @@ export function WorkflowEditor({
                 const newPhases = [...phases];
                 newPhases[i] = updated;
                 setPhases(newPhases);
+                setDirty(true);
               }}
-              onRemove={() => setPhases(phases.filter((_, j) => j !== i))}
+              onRemove={() => { setPhases(phases.filter((_, j) => j !== i)); setDirty(true); }}
             />
           ))}
 
@@ -226,20 +251,6 @@ export function WorkflowEditor({
             <Plus size={14} />
             Add Phase
           </button>
-
-          <div className="flex gap-2 pb-4">
-            <button
-              onClick={handleSave}
-              disabled={saving || !name.trim()}
-              className="btn-primary flex items-center gap-1.5"
-            >
-              <Save size={13} />
-              {saving ? 'Saving...' : 'Save'}
-            </button>
-            <button onClick={onCancel} className="btn-secondary">
-              Cancel
-            </button>
-          </div>
         </div>
       </div>
 

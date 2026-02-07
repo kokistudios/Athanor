@@ -6,6 +6,7 @@ import type { AgentManager } from './agent-manager';
 import type { ApprovalRouter } from './approval-router';
 import type { WorktreeManager } from './worktree-manager';
 import type { AthanorConfig } from '../../shared/types/config';
+import type { WorkflowPhaseConfig } from '../../shared/types/workflow-phase';
 import { buildSystemPreamble } from '../prompts/system-preamble';
 
 export interface StartSessionOptions {
@@ -14,10 +15,6 @@ export interface StartSessionOptions {
   workflowId: string;
   context?: string;
   description?: string;
-}
-
-interface WorkflowPhaseConfig {
-  permission_mode?: string;
 }
 
 export class WorkflowEngine extends EventEmitter {
@@ -261,6 +258,7 @@ export class WorkflowEngine extends EventEmitter {
     // (athanor_phase_complete) to signal completion — default to bypassPermissions.
     const permissionMode =
       phaseConfig.permission_mode || 'bypassPermissions';
+    const agentType = phaseConfig.agent_type || 'claude';
 
     await this.agentManager.spawnAgent({
       sessionId,
@@ -273,6 +271,7 @@ export class WorkflowEngine extends EventEmitter {
       allowedTools,
       agents,
       permissionMode,
+      agentType,
     });
   }
 

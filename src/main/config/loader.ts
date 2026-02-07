@@ -66,6 +66,7 @@ export function loadConfig(): AthanorConfig {
     database: { ...defaultConfig.database, ...parsed.database },
     storage: { ...defaultConfig.storage, ...parsed.storage },
     claude: { ...defaultConfig.claude, ...parsed.claude },
+    codex: { ...defaultConfig.codex, ...parsed.codex },
     preferences: { ...defaultConfig.preferences, ...parsed.preferences },
   };
 

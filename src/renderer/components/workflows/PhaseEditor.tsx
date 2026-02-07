@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { TransparentMarkdownEditor } from '../shared/TransparentMarkdownEditor';
 import { ChevronRight, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
+import type { CliAgentType, PhasePermissionMode } from '../../../shared/types/domain';
 
 export interface PhaseData {
   id?: string;
@@ -10,7 +11,8 @@ export interface PhaseData {
   allowed_tools: string[] | null;
   agents: Record<string, unknown>;
   approval: string;
-  permission_mode: 'default' | 'bypassPermissions';
+  permission_mode: PhasePermissionMode;
+  agent_type: CliAgentType;
 }
 
 interface PhaseEditorProps {
@@ -68,6 +70,12 @@ export function PhaseEditor({
           </span>
         )}
         <span
+          className={`badge ${phase.agent_type === 'codex' ? 'badge-blue' : 'badge-neutral'}`}
+          style={{ flexShrink: 0 }}
+        >
+          {phase.agent_type === 'codex' ? 'Codex' : 'Claude'}
+        </span>
+        <span
           className="phase-accordion-remove"
           role="button"
           tabIndex={-1}
@@ -107,6 +115,24 @@ export function PhaseEditor({
                     <option value="none">No gate</option>
                     <option value="before">Before phase</option>
                     <option value="after">After phase</option>
+                  </select>
+                </div>
+              </div>
+              <div className="phase-field" style={{ flex: 1, marginBottom: 0 }}>
+                <label className="phase-label">CLI Agent</label>
+                <div className="phase-select-wrap">
+                  <select
+                    value={phase.agent_type}
+                    onChange={(e) =>
+                      onChange({
+                        ...phase,
+                        agent_type: e.target.value as PhaseData['agent_type'],
+                      })
+                    }
+                    className="phase-select"
+                  >
+                    <option value="claude">Claude</option>
+                    <option value="codex">Codex</option>
                   </select>
                 </div>
               </div>

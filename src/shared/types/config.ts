@@ -28,6 +28,10 @@ export interface AthanorConfig {
     default_model: string;
     default_permission_mode: string;
   };
+  codex: {
+    path: string;
+    default_model: string;
+  };
   preferences: {
     theme: 'light' | 'dark' | 'system';
     message_preview_length: number;

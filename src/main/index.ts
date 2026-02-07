@@ -60,7 +60,7 @@ async function bootstrap(): Promise<void> {
   config = loadConfig();
   console.log('Loaded config');
   console.log(
-    `Config paths: db=${config.database.sqlite.path} storage=${config.storage.local.path} claude=${config.claude.path || 'claude'}`,
+    `Config paths: db=${config.database.sqlite.path} storage=${config.storage.local.path} claude=${config.claude.path || 'claude'} codex=${config.codex.path || 'codex'}`,
   );
 
   // Initialize database

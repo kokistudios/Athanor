@@ -3,13 +3,16 @@ import type { Kysely } from 'kysely';
 import { z } from 'zod';
 import type { Database } from '../../shared/types/database';
 import type { ServiceRegistry } from '../services/service-registry';
+import { CLI_AGENT_TYPES, PHASE_PERMISSION_MODES } from '../../shared/types/domain';
 import { registerSecureIpcHandler } from './security';
 
 const uuidSchema = z.string().uuid();
-const permissionModeSchema = z.enum(['default', 'bypassPermissions']);
+const permissionModeSchema = z.enum(PHASE_PERMISSION_MODES);
+const cliAgentTypeSchema = z.enum(CLI_AGENT_TYPES);
 const workflowPhaseConfigSchema = z
   .object({
     permission_mode: permissionModeSchema.optional(),
+    agent_type: cliAgentTypeSchema.optional(),
   })
   .strict();
 

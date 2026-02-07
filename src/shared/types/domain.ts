@@ -24,6 +24,12 @@ export type MessageType = (typeof MESSAGE_TYPES)[number];
 export const PHASE_APPROVALS = ['none', 'before', 'after'] as const;
 export type PhaseApproval = (typeof PHASE_APPROVALS)[number];
 
+export const PHASE_PERMISSION_MODES = ['default', 'bypassPermissions'] as const;
+export type PhasePermissionMode = (typeof PHASE_PERMISSION_MODES)[number];
+
+export const CLI_AGENT_TYPES = ['claude', 'codex'] as const;
+export type CliAgentType = (typeof CLI_AGENT_TYPES)[number];
+
 export const DECISION_TYPES = ['decision', 'finding'] as const;
 export type DecisionType = (typeof DECISION_TYPES)[number];
 

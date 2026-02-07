@@ -9,6 +9,15 @@ import type { Kysely } from 'kysely';
 import type { Database } from '../../shared/types/database';
 import type { ContentStore } from './content-store';
 import type { AthanorConfig } from '../../shared/types/config';
+import type { CliAgentType } from '../../shared/types/domain';
+import { getCliAgentAdapter } from './cli-agents/registry';
+import type {
+  CliAgentAdapter,
+  CliAgentSpawnSpec,
+  McpServerDefinition,
+  ParsedAssistantMessage,
+} from './cli-agents/types';
+import type { WorkflowPhaseConfig } from '../../shared/types/workflow-phase';
 
 export interface SpawnAgentOptions {
   sessionId: string;
@@ -21,6 +30,7 @@ export interface SpawnAgentOptions {
   allowedTools?: string[] | null;
   agents?: Record<string, unknown>;
   permissionMode?: string;
+  agentType?: CliAgentType;
   claudeSessionId?: string;
   mcpConfigPath?: string;
 }
@@ -32,6 +42,8 @@ export interface AgentProcess {
   name: string;
   process: ChildProcess;
   detached: boolean;
+  agentType: CliAgentType;
+  adapter: CliAgentAdapter;
 }
 
 export interface EscalationRequest {
@@ -56,6 +68,8 @@ export class AgentManager extends EventEmitter {
 
   async spawnAgent(opts: SpawnAgentOptions): Promise<string> {
     const agentId = crypto.randomUUID();
+    const agentType = opts.agentType || 'claude';
+    const adapter = getCliAgentAdapter(agentType);
 
     // Insert agent row
     await this.db
@@ -72,111 +86,115 @@ export class AgentManager extends EventEmitter {
       })
       .execute();
 
-    // Build MCP config for this agent
-    const mcpConfigPath = opts.mcpConfigPath || (await this.generateMcpConfig(agentId, opts));
+    const mcpServer = this.buildAthanorMcpServer(agentId, opts);
+    const mcpConfigPath = opts.mcpConfigPath || (await this.generateMcpConfig(agentId, mcpServer));
+    const permissionMode = opts.permissionMode || this.config.claude.default_permission_mode || 'default';
+    const spawnSpec = adapter.buildSpawnSpec(
+      {
+        prompt: opts.prompt,
+        systemPrompt: opts.systemPrompt,
+        worktreePath: opts.worktreePath,
+        permissionMode,
+        allowedTools: opts.allowedTools,
+        agents: opts.agents,
+        mcpConfigPath,
+        mcpServer,
+        resumeSessionId: opts.claudeSessionId || undefined,
+      },
+      this.config,
+    );
 
-    // Build CLI args
-    const args: string[] = [
-      '--print',
-      '--input-format',
-      'stream-json',
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '--include-partial-messages',
-    ];
+    await this.launchAgentProcess({
+      agentId,
+      sessionId: opts.sessionId,
+      phaseId: opts.phaseId,
+      name: opts.name,
+      worktreePath: opts.worktreePath,
+      agentType,
+      adapter,
+      spawnSpec,
+      initialUserInput: opts.prompt,
+    });
 
-    if (opts.systemPrompt) {
-      args.push('--system-prompt', opts.systemPrompt);
-    }
-    // allowedTools handled below alongside MCP tool injection
-    if (opts.agents && Object.keys(opts.agents).length > 0) {
-      args.push('--agents', JSON.stringify(opts.agents));
-    }
-    const permissionMode =
-      opts.permissionMode || this.config.claude.default_permission_mode || 'default';
-    args.push('--permission-mode', permissionMode);
-    if (permissionMode === 'bypassPermissions') {
-      args.push('--dangerously-skip-permissions');
-    }
-    if (mcpConfigPath) {
-      args.push('--mcp-config', mcpConfigPath);
-      // Ensure MCP tools are explicitly allowed — Claude CLI may not
-      // auto-discover them even with bypassPermissions.
-      const mcpToolPrefix = 'mcp__athanor__';
-      const athanorTools = [
-        `${mcpToolPrefix}athanor_context`,
-        `${mcpToolPrefix}athanor_record`,
-        `${mcpToolPrefix}athanor_decide`,
-        `${mcpToolPrefix}athanor_artifact`,
-        `${mcpToolPrefix}athanor_phase_complete`,
-      ];
-      const merged = [...(opts.allowedTools || []), ...athanorTools];
-      args.push('--allowedTools', merged.join(','));
-    } else if (opts.allowedTools) {
-      args.push('--allowedTools', opts.allowedTools.join(','));
-    }
-    if (opts.claudeSessionId) {
-      args.push('--resume', opts.claudeSessionId);
-    }
+    return agentId;
+  }
 
-    // Spawn the process
-    const claudePath = this.config.claude.path || 'claude';
+  private async launchAgentProcess(opts: {
+    agentId: string;
+    sessionId: string;
+    phaseId: string;
+    name: string;
+    worktreePath: string;
+    agentType: CliAgentType;
+    adapter: CliAgentAdapter;
+    spawnSpec: CliAgentSpawnSpec;
+    initialUserInput?: string;
+  }): Promise<void> {
     console.log(
-      `[agent:${opts.name}] Spawning: ${claudePath} ${args.slice(0, 6).join(' ')} ... (cwd: ${opts.worktreePath})`,
+      `[agent:${opts.name}] Spawning (${opts.agentType}): ${opts.spawnSpec.command} ${opts.spawnSpec.args.slice(0, 8).join(' ')} ... (cwd: ${opts.worktreePath})`,
     );
 
     const detached = process.platform !== 'win32';
-    const proc = spawn(claudePath, args, {
+    const proc = spawn(opts.spawnSpec.command, opts.spawnSpec.args, {
       cwd: opts.worktreePath,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached,
+      env: opts.spawnSpec.env ? { ...process.env, ...opts.spawnSpec.env } : process.env,
     });
 
     console.log(`[agent:${opts.name}] Process PID: ${proc.pid}`);
 
     const agentProcess: AgentProcess = {
-      id: agentId,
+      id: opts.agentId,
       sessionId: opts.sessionId,
       phaseId: opts.phaseId,
       name: opts.name,
       process: proc,
       detached,
+      agentType: opts.agentType,
+      adapter: opts.adapter,
     };
 
-    this.activeAgents.set(agentId, agentProcess);
+    this.activeAgents.set(opts.agentId, agentProcess);
 
-    // Handle spawn errors (e.g. claude binary not found)
+    // Handle spawn errors (e.g. CLI binary not found)
     proc.on('error', async (err) => {
       console.error(`[agent:${opts.name}] Spawn error:`, err);
-      this.activeAgents.delete(agentId);
+      this.activeAgents.delete(opts.agentId);
       await this.db
         .updateTable('agents')
         .set({ status: 'failed', completed_at: new Date().toISOString() })
-        .where('id', '=', agentId)
+        .where('id', '=', opts.agentId)
         .execute();
-      this.emit('agent:status-change', { agentId, status: 'failed' });
+      this.emit('agent:status-change', { agentId: opts.agentId, status: 'failed' });
     });
 
     // Update status to running
     await this.db
       .updateTable('agents')
       .set({ status: 'running' })
-      .where('id', '=', agentId)
+      .where('id', '=', opts.agentId)
       .execute();
 
-    this.emit('agent:status-change', { agentId, status: 'running' });
+    this.emit('agent:status-change', { agentId: opts.agentId, status: 'running' });
 
     // Parse stdout
-    this.setupStdoutParsing(agentId, proc, opts);
+    this.setupStdoutParsing(agentProcess);
 
-    // Kick off the phase with an explicit stream-json user message.
-    try {
-      await this.sendInput(agentId, opts.prompt);
-    } catch (err) {
-      console.error(`[agent:${opts.name}] Failed to send initial prompt:`, err);
-      await this.killAgent(agentId);
-      throw err;
+    // Send initial prompt if the adapter expects initial stdin input.
+    if (opts.spawnSpec.initialInput !== undefined && opts.initialUserInput !== undefined) {
+      try {
+        await this.sendInputInternal(opts.agentId, opts.initialUserInput, {
+          transportInput: opts.spawnSpec.initialInput,
+          closeAfterWrite: opts.spawnSpec.closeStdinAfterInitialInput || false,
+          bypassInteractiveCheck: true,
+          persistMessage: true,
+        });
+      } catch (err) {
+        console.error(`[agent:${opts.name}] Failed to send initial prompt:`, err);
+        await this.killAgent(opts.agentId);
+        throw err;
+      }
     }
 
     // Handle stderr — log it for debugging
@@ -193,30 +211,37 @@ export class AgentManager extends EventEmitter {
       if (code !== 0 && stderrChunks.length > 0) {
         console.error(`[agent:${opts.name}] Full stderr:\n${stderrChunks.join('')}`);
       }
-      this.activeAgents.delete(agentId);
-      await this.handleAgentExit(agentId, code);
+      this.activeAgents.delete(opts.agentId);
+      await this.handleAgentExit(opts.agentId, code, opts.adapter.exitsAfterTurn);
     });
-
-    return agentId;
   }
 
-  private async generateMcpConfig(agentId: string, opts: SpawnAgentOptions): Promise<string> {
+  private buildAthanorMcpServer(agentId: string, opts: SpawnAgentOptions): McpServerDefinition {
+    return {
+      name: 'athanor',
+      command: 'node',
+      args: [path.join(process.cwd(), 'dist', 'mcp', 'mcp', 'server.js')],
+      env: {
+        PATH: process.env.PATH || '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin',
+        HOME: process.env.HOME || '',
+        USER: process.env.USER || '',
+        ATHANOR_DB_PATH: this.config.database.sqlite.path,
+        ATHANOR_AGENT_ID: agentId,
+        ATHANOR_SESSION_ID: opts.sessionId,
+        ATHANOR_PHASE_ID: opts.phaseId,
+        ATHANOR_DATA_DIR: this.config.storage.local.path,
+      },
+    };
+  }
+
+  private async generateMcpConfig(agentId: string, mcpServer: McpServerDefinition): Promise<string> {
     const mcpConfig = {
       mcpServers: {
-        athanor: {
+        [mcpServer.name]: {
           type: 'stdio',
-          command: 'node',
-          args: [path.join(process.cwd(), 'dist', 'mcp', 'mcp', 'server.js')],
-          env: {
-            PATH: process.env.PATH || '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin',
-            HOME: process.env.HOME || '',
-            USER: process.env.USER || '',
-            ATHANOR_DB_PATH: this.config.database.sqlite.path,
-            ATHANOR_AGENT_ID: agentId,
-            ATHANOR_SESSION_ID: opts.sessionId,
-            ATHANOR_PHASE_ID: opts.phaseId,
-            ATHANOR_DATA_DIR: this.config.storage.local.path,
-          },
+          command: mcpServer.command,
+          args: mcpServer.args,
+          env: mcpServer.env,
         },
       },
     };
@@ -228,162 +253,187 @@ export class AgentManager extends EventEmitter {
     return configPath;
   }
 
-  private setupStdoutParsing(agentId: string, proc: ChildProcess, opts: SpawnAgentOptions): void {
-    if (!proc.stdout) {
-      throw new Error(`Agent ${opts.name} did not provide a stdout stream`);
+  private setupStdoutParsing(agent: AgentProcess): void {
+    if (!agent.process.stdout) {
+      throw new Error(`Agent ${agent.name} did not provide a stdout stream`);
     }
-    const rl = readline.createInterface({ input: proc.stdout });
+    const rl = readline.createInterface({ input: agent.process.stdout });
     const previewLen = this.config.preferences.message_preview_length;
     let lineCount = 0;
 
     rl.on('line', async (line) => {
       lineCount++;
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        console.log(`[agent:${opts.name}] Non-JSON line #${lineCount}: ${line.slice(0, 100)}`);
+
+      const parsed = agent.adapter.parseStdoutLine(line);
+      if (!parsed) {
+        console.log(`[agent:${agent.name}] Non-JSON line #${lineCount}: ${line.slice(0, 120)}`);
         return;
       }
 
-      const eventType = parsed.type as string;
-      console.log(`[agent:${opts.name}] Stream event #${lineCount}: type=${eventType}`);
+      const eventType = typeof parsed.type === 'string' ? parsed.type : 'unknown';
+      console.log(`[agent:${agent.name}] Stream event #${lineCount}: type=${eventType}`);
 
       try {
-        await this.handleStreamEvent(agentId, parsed, previewLen);
+        await this.handleStreamEvent(agent, parsed, previewLen);
       } catch (err) {
-        console.error(`[agent:${opts.name}] Error handling stream event:`, err);
+        console.error(`[agent:${agent.name}] Error handling stream event:`, err);
       }
     });
 
     rl.on('close', () => {
-      console.log(`[agent:${opts.name}] stdout closed after ${lineCount} lines`);
+      console.log(`[agent:${agent.name}] stdout closed after ${lineCount} lines`);
     });
   }
 
   private async handleStreamEvent(
-    agentId: string,
+    agent: AgentProcess,
     event: Record<string, unknown>,
     previewLen: number,
   ): Promise<void> {
-    const type = event.type as string;
-    const token = this.extractTokenDelta(event);
+    const token = agent.adapter.extractTokenDelta(event);
     if (token) {
-      this.emit('agent:token', { agentId, text: token });
+      this.emit('agent:token', { agentId: agent.id, text: token });
     }
 
-    switch (type) {
-      case 'system': {
-        if ((event as { subtype?: string }).subtype === 'init') {
-          const sessionId = (event as { session_id?: string }).session_id;
-          if (sessionId) {
-            await this.db
-              .updateTable('agents')
-              .set({ claude_session_id: sessionId })
-              .where('id', '=', agentId)
-              .execute();
-          }
-          this.emit('agent:init', { agentId, event });
-        }
-        break;
+    const sessionId = agent.adapter.extractInitSessionId(event);
+    if (sessionId) {
+      await this.db
+        .updateTable('agents')
+        .set({ claude_session_id: sessionId })
+        .where('id', '=', agent.id)
+        .execute();
+      this.emit('agent:init', { agentId: agent.id, event });
+    }
+
+    await this.maybeEmitEscalationRequest(agent.id, event);
+
+    const assistant = agent.adapter.extractAssistantMessage(event);
+    if (assistant) {
+      await this.persistAssistantMessage(agent.id, assistant, previewLen, event);
+      return;
+    }
+
+    const resultMetadata = agent.adapter.extractResultMetadata(event);
+    if (resultMetadata) {
+      await this.persistResultMessage(agent.id, resultMetadata);
+      await this.handleResultEvent(agent.id, agent.adapter);
+    }
+  }
+
+  private async persistAssistantMessage(
+    agentId: string,
+    assistant: ParsedAssistantMessage,
+    previewLen: number,
+    rawEvent: Record<string, unknown>,
+  ): Promise<void> {
+    const messageId = crypto.randomUUID();
+    const content = JSON.stringify(assistant.message);
+
+    let contentPreview: string | null = null;
+    let contentPath: string | null = null;
+
+    if (content.length <= previewLen) {
+      contentPreview = content;
+    } else {
+      contentPreview = content.slice(0, previewLen);
+      const key = `sessions/${agentId}/messages/${messageId}.json`;
+      await this.contentStore.write(key, content);
+      contentPath = key;
+    }
+
+    await this.db
+      .insertInto('messages')
+      .values({
+        id: messageId,
+        agent_id: agentId,
+        type: 'assistant',
+        content_preview: contentPreview,
+        content_path: contentPath,
+        parent_tool_use_id: assistant.parentToolUseId || null,
+      })
+      .execute();
+
+    this.emit('agent:message', {
+      agentId,
+      messageId,
+      type: 'assistant',
+      event: rawEvent,
+    });
+  }
+
+  private async persistResultMessage(agentId: string, metadata: Record<string, unknown>): Promise<void> {
+    const messageId = crypto.randomUUID();
+    const serializedMetadata = JSON.stringify(metadata);
+
+    await this.db
+      .insertInto('messages')
+      .values({
+        id: messageId,
+        agent_id: agentId,
+        type: 'result',
+        content_preview: this.buildResultPreview(metadata),
+        metadata: serializedMetadata,
+      })
+      .execute();
+  }
+
+  private buildResultPreview(metadata: Record<string, unknown>): string {
+    if (typeof metadata.total_cost_usd === 'number') {
+      return `Cost: $${metadata.total_cost_usd.toFixed(4)}`;
+    }
+
+    const usage = this.asRecord(metadata.usage);
+    if (usage) {
+      const total = usage.total_tokens;
+      if (typeof total === 'number') {
+        return `Usage: ${total} tokens`;
       }
-
-      case 'stream_event': {
-        await this.maybeEmitEscalationRequest(agentId, event);
-        break;
+      const input = usage.input_tokens;
+      const output = usage.output_tokens;
+      if (typeof input === 'number' || typeof output === 'number') {
+        const inText = typeof input === 'number' ? input : 0;
+        const outText = typeof output === 'number' ? output : 0;
+        return `Usage: ${inText} in / ${outText} out`;
       }
+    }
 
-      case 'assistant': {
-        const messageId = crypto.randomUUID();
-        const message = (event as { message?: unknown }).message;
-        const content = JSON.stringify(message);
-        const parentToolUseId =
-          (event as { parent_tool_use_id?: string }).parent_tool_use_id || null;
+    return 'Run complete';
+  }
 
-        let contentPreview: string | null = null;
-        let contentPath: string | null = null;
+  private async handleResultEvent(agentId: string, adapter: CliAgentAdapter): Promise<void> {
+    // If agent reached a terminal status (e.g. via athanor_phase_complete),
+    // notify immediately and terminate the process.
+    const agent = await this.db
+      .selectFrom('agents')
+      .select('status')
+      .where('id', '=', agentId)
+      .executeTakeFirst();
 
-        // Always store the full message JSON so the renderer can access
-        // all content blocks (text, thinking, tool_use), not just text.
-        if (content.length <= previewLen) {
-          contentPreview = content;
-        } else {
-          contentPreview = content.slice(0, previewLen);
-          const key = `sessions/${agentId}/messages/${messageId}.json`;
-          await this.contentStore.write(key, content);
-          contentPath = key;
-        }
-
-        await this.db
-          .insertInto('messages')
-          .values({
-            id: messageId,
-            agent_id: agentId,
-            type: 'assistant',
-            content_preview: contentPreview,
-            content_path: contentPath,
-            parent_tool_use_id: parentToolUseId,
-          })
-          .execute();
-
-        this.emit('agent:message', { agentId, messageId, type: 'assistant', event });
-        break;
+    if (agent && (agent.status === 'completed' || agent.status === 'failed')) {
+      if (agent.status === 'completed' && !this.completedAgentIds.has(agentId)) {
+        this.completedAgentIds.add(agentId);
+        this.emit('agent:completed', { agentId });
       }
+      this.terminateProcess(agentId);
+      return;
+    }
 
-      case 'result': {
-        const messageId = crypto.randomUUID();
-        const metadata = JSON.stringify({
-          total_cost_usd: (event as { total_cost_usd?: number }).total_cost_usd,
-          usage: (event as { usage?: unknown }).usage,
-          session_id: (event as { session_id?: string }).session_id,
-        });
+    if (agent && agent.status === 'running' && (adapter.waitsForInputAfterResult || adapter.exitsAfterTurn)) {
+      // Agent completed a turn and is ready for follow-up input.
+      await this.db
+        .updateTable('agents')
+        .set({ status: 'waiting' })
+        .where('id', '=', agentId)
+        .execute();
+      this.emit('agent:status-change', { agentId, status: 'waiting' });
 
-        await this.db
-          .insertInto('messages')
-          .values({
-            id: messageId,
-            agent_id: agentId,
-            type: 'result',
-            content_preview: `Cost: $${(event as { total_cost_usd?: number }).total_cost_usd?.toFixed(4) || '0'}`,
-            metadata,
-          })
-          .execute();
-
-        // If agent reached a terminal status (e.g. via athanor_phase_complete),
-        // notify immediately and terminate the process.
-        const agent = await this.db
-          .selectFrom('agents')
-          .select('status')
-          .where('id', '=', agentId)
-          .executeTakeFirst();
-
-        if (agent && (agent.status === 'completed' || agent.status === 'failed')) {
-          if (agent.status === 'completed' && !this.completedAgentIds.has(agentId)) {
-            this.completedAgentIds.add(agentId);
-            this.emit('agent:completed', { agentId });
-          }
-          this.terminateProcess(agentId);
-        } else if (agent && agent.status === 'running') {
-          // Agent finished its turn without calling athanor_phase_complete.
-          // Set to waiting and let the user decide (via approval queue).
-          await this.db
-            .updateTable('agents')
-            .set({ status: 'waiting' })
-            .where('id', '=', agentId)
-            .execute();
-          this.emit('agent:status-change', { agentId, status: 'waiting' });
-
-          // Look up the sessionId from the active agent record
-          const agentRecord = await this.db
-            .selectFrom('agents')
-            .select('session_id')
-            .where('id', '=', agentId)
-            .executeTakeFirst();
-          if (agentRecord) {
-            this.emit('agent:turn-ended', { agentId, sessionId: agentRecord.session_id });
-          }
-        }
-        break;
+      const agentRecord = await this.db
+        .selectFrom('agents')
+        .select('session_id')
+        .where('id', '=', agentId)
+        .executeTakeFirst();
+      if (agentRecord) {
+        this.emit('agent:turn-ended', { agentId, sessionId: agentRecord.session_id });
       }
     }
   }
@@ -414,7 +464,11 @@ export class AgentManager extends EventEmitter {
     }
   }
 
-  private async handleAgentExit(agentId: string, code: number | null): Promise<void> {
+  private async handleAgentExit(
+    agentId: string,
+    code: number | null,
+    preserveWaitingOnZeroExit = false,
+  ): Promise<void> {
     const agent = await this.db
       .selectFrom('agents')
       .selectAll()
@@ -427,17 +481,22 @@ export class AgentManager extends EventEmitter {
 
     // Only update DB if not already terminal
     if (finalStatus !== 'completed' && finalStatus !== 'failed') {
-      finalStatus = code === 0 ? 'completed' : 'failed';
-      await this.db
-        .updateTable('agents')
-        .set({
-          status: finalStatus,
-          completed_at: new Date().toISOString(),
-        })
-        .where('id', '=', agentId)
-        .execute();
+      const shouldStayWaiting =
+        preserveWaitingOnZeroExit && code === 0 && finalStatus === 'waiting';
 
-      this.emit('agent:status-change', { agentId, status: finalStatus });
+      if (!shouldStayWaiting) {
+        finalStatus = code === 0 ? 'completed' : 'failed';
+        await this.db
+          .updateTable('agents')
+          .set({
+            status: finalStatus,
+            completed_at: new Date().toISOString(),
+          })
+          .where('id', '=', agentId)
+          .execute();
+
+        this.emit('agent:status-change', { agentId, status: finalStatus });
+      }
     }
 
     // Notify on completion — workflow engine needs this to advance.
@@ -501,31 +560,193 @@ export class AgentManager extends EventEmitter {
   }
 
   async sendInput(agentId: string, input: string): Promise<void> {
-    const agentProcess = this.activeAgents.get(agentId);
-    const stdin = agentProcess?.process.stdin;
-    if (!stdin || !stdin.writable) {
+    if (this.activeAgents.has(agentId)) {
+      await this.sendInputInternal(agentId, input, {
+        persistMessage: true,
+        closeAfterWrite: false,
+        bypassInteractiveCheck: false,
+      });
+      return;
+    }
+
+    const runtime = await this.resolveAgentRuntimeForRestart(agentId);
+    if (!runtime.adapter.exitsAfterTurn) {
       throw new Error(`Agent ${agentId} is not accepting input`);
     }
+
+    const mcpServer = this.buildAthanorMcpServer(agentId, {
+      sessionId: runtime.sessionId,
+      phaseId: runtime.phaseId,
+      name: runtime.name,
+      prompt: input,
+      worktreePath: runtime.worktreePath,
+    });
+    const mcpConfigPath = await this.generateMcpConfig(agentId, mcpServer);
+    const spawnSpec = runtime.adapter.buildSpawnSpec(
+      {
+        prompt: input,
+        worktreePath: runtime.worktreePath,
+        permissionMode: runtime.permissionMode,
+        allowedTools: runtime.allowedTools,
+        agents: runtime.agents,
+        mcpConfigPath,
+        mcpServer,
+        resumeSessionId: runtime.resumeSessionId,
+      },
+      this.config,
+    );
+
+    await this.launchAgentProcess({
+      agentId,
+      sessionId: runtime.sessionId,
+      phaseId: runtime.phaseId,
+      name: runtime.name,
+      worktreePath: runtime.worktreePath,
+      agentType: runtime.agentType,
+      adapter: runtime.adapter,
+      spawnSpec,
+      initialUserInput: input,
+    });
+  }
+
+  private async resolveAgentRuntimeForRestart(agentId: string): Promise<{
+    sessionId: string;
+    phaseId: string;
+    name: string;
+    worktreePath: string;
+    agentType: CliAgentType;
+    adapter: CliAgentAdapter;
+    permissionMode: string;
+    allowedTools: string[] | null;
+    agents?: Record<string, unknown>;
+    resumeSessionId?: string;
+  }> {
+    const agent = await this.db
+      .selectFrom('agents')
+      .select(['id', 'session_id', 'phase_id', 'name', 'worktree_path', 'claude_session_id', 'status'])
+      .where('id', '=', agentId)
+      .executeTakeFirst();
+
+    if (!agent) {
+      throw new Error(`Agent ${agentId} not found`);
+    }
+
+    if (agent.status !== 'waiting') {
+      throw new Error(`Agent ${agentId} is not waiting for input`);
+    }
+
+    if (!agent.worktree_path) {
+      throw new Error(`Agent ${agentId} has no worktree path`);
+    }
+
+    const phase = await this.db
+      .selectFrom('workflow_phases')
+      .select(['config', 'allowed_tools', 'agents'])
+      .where('id', '=', agent.phase_id)
+      .executeTakeFirst();
+
+    let phaseConfig: WorkflowPhaseConfig = {};
+    if (phase?.config) {
+      try {
+        phaseConfig = JSON.parse(phase.config) as WorkflowPhaseConfig;
+      } catch {
+        // ignore malformed phase config
+      }
+    }
+
+    let allowedTools: string[] | null = null;
+    if (phase?.allowed_tools) {
+      try {
+        const parsed = JSON.parse(phase.allowed_tools) as unknown;
+        if (Array.isArray(parsed)) {
+          allowedTools = parsed.filter((tool): tool is string => typeof tool === 'string');
+        }
+      } catch {
+        // ignore malformed allowed tools
+      }
+    }
+
+    let agents: Record<string, unknown> | undefined;
+    if (phase?.agents) {
+      try {
+        const parsed = JSON.parse(phase.agents) as unknown;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          agents = parsed as Record<string, unknown>;
+        }
+      } catch {
+        // ignore malformed agents config
+      }
+    }
+
+    const agentType = phaseConfig.agent_type || 'claude';
+    const adapter = getCliAgentAdapter(agentType);
+
+    return {
+      sessionId: agent.session_id,
+      phaseId: agent.phase_id,
+      name: agent.name,
+      worktreePath: agent.worktree_path,
+      agentType,
+      adapter,
+      permissionMode: phaseConfig.permission_mode || 'bypassPermissions',
+      allowedTools,
+      agents,
+      resumeSessionId: agent.claude_session_id || undefined,
+    };
+  }
+
+  private async sendInputInternal(
+    agentId: string,
+    input: string,
+    opts: {
+      transportInput?: string;
+      persistMessage?: boolean;
+      closeAfterWrite?: boolean;
+      bypassInteractiveCheck?: boolean;
+    },
+  ): Promise<void> {
+    const agentProcess = this.activeAgents.get(agentId);
+    const stdin = agentProcess?.process.stdin;
+    if (!agentProcess || !stdin || !stdin.writable) {
+      throw new Error(`Agent ${agentId} is not accepting input`);
+    }
+    if (!opts.bypassInteractiveCheck && !agentProcess.adapter.supportsInteractiveInput) {
+      throw new Error(`Agent ${agentId} (${agentProcess.agentType}) does not support follow-up input`);
+    }
+
+    const transportInput = opts.transportInput ?? input;
+    const payload = agentProcess.adapter.formatUserInput(transportInput);
     const message: { role: 'user'; content: Array<{ type: 'text'; text: string }> } = {
       role: 'user',
       content: [{ type: 'text', text: input }],
     };
-    const payload = JSON.stringify({
-      type: 'user',
-      message,
-    });
 
-    await new Promise<void>((resolve, reject) => {
-      stdin.write(`${payload}\n`, (err) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-        resolve();
+    if (opts.closeAfterWrite) {
+      await new Promise<void>((resolve, reject) => {
+        stdin.write(payload, (err) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          stdin.end();
+          resolve();
+        });
       });
-    });
+    } else {
+      await new Promise<void>((resolve, reject) => {
+        stdin.write(payload, (err) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve();
+        });
+      });
+    }
 
-    await this.persistUserMessage(agentId, message);
+    if (opts.persistMessage !== false) {
+      await this.persistUserMessage(agentId, message);
+    }
   }
 
   private async persistUserMessage(
@@ -571,36 +792,6 @@ export class AgentManager extends EventEmitter {
       type: 'user',
       event: { type: 'user', message },
     });
-  }
-
-  private extractTokenDelta(event: Record<string, unknown>): string | null {
-    const streamEvent = event.event as Record<string, unknown> | undefined;
-    const rootType = event.type as string | undefined;
-    const nestedType = streamEvent?.type as string | undefined;
-    const deltaFromRoot = event.delta as { type?: string; text?: string } | undefined;
-    const deltaFromNested = streamEvent?.delta as { type?: string; text?: string } | undefined;
-
-    if (
-      rootType === 'content_block_delta' &&
-      deltaFromRoot?.type === 'text_delta' &&
-      deltaFromRoot.text
-    ) {
-      return deltaFromRoot.text;
-    }
-    if (rootType === 'message_delta' && typeof (event.text as unknown) === 'string') {
-      return event.text as string;
-    }
-    if (
-      nestedType === 'content_block_delta' &&
-      deltaFromNested?.type === 'text_delta' &&
-      deltaFromNested.text
-    ) {
-      return deltaFromNested.text;
-    }
-    if (nestedType === 'message_delta' && typeof (streamEvent?.text as unknown) === 'string') {
-      return streamEvent.text as string;
-    }
-    return null;
   }
 
   private async maybeEmitEscalationRequest(
@@ -652,16 +843,26 @@ export class AgentManager extends EventEmitter {
     payload: Record<string, unknown>;
   } | null {
     const nestedEvent = this.asRecord(event.event);
+    const item = this.asRecord(event.item);
     const rootType = typeof event.type === 'string' ? event.type : '';
     const nestedType = nestedEvent && typeof nestedEvent.type === 'string' ? nestedEvent.type : '';
     const nestedSubtype =
       nestedEvent && typeof nestedEvent.subtype === 'string' ? nestedEvent.subtype : '';
+    const itemType = this.pickString(item, ['type']) || '';
+    const itemStatus = this.pickString(item, ['status', 'state']) || '';
+    const rootStatus = this.pickString(event, ['status', 'state']) || '';
 
-    const typeText = `${rootType} ${nestedType} ${nestedSubtype}`.toLowerCase();
+    const typeText = `${rootType} ${nestedType} ${nestedSubtype} ${itemType} ${itemStatus} ${rootStatus}`.toLowerCase();
+    const commandEscalation =
+      (typeText.includes('command') && typeText.includes('blocked')) ||
+      typeText.includes('needs_approval') ||
+      typeText.includes('needs approval') ||
+      typeText.includes('permission_required');
     const looksLikeEscalation =
       typeText.includes('permission') ||
       typeText.includes('approval') ||
-      typeText.includes('escalat');
+      typeText.includes('escalat') ||
+      commandEscalation;
 
     if (!looksLikeEscalation) {
       return null;
@@ -669,17 +870,22 @@ export class AgentManager extends EventEmitter {
 
     const requestId =
       this.pickString(event, ['request_id', 'requestId', 'id']) ||
-      this.pickString(nestedEvent, ['request_id', 'requestId', 'id']);
+      this.pickString(nestedEvent, ['request_id', 'requestId', 'id']) ||
+      this.pickString(item, ['request_id', 'requestId', 'id']);
 
     const toolName =
       this.pickString(event, ['tool_name', 'toolName', 'tool']) ||
-      this.pickString(nestedEvent, ['tool_name', 'toolName', 'tool']);
+      this.pickString(nestedEvent, ['tool_name', 'toolName', 'tool']) ||
+      this.pickString(item, ['tool_name', 'toolName', 'tool', 'name']);
 
     const nestedInput = this.asRecord(nestedEvent?.input);
+    const itemInput = this.asRecord(item?.input) || this.asRecord(item?.arguments);
     const command =
       this.pickString(event, ['command']) ||
       this.pickString(nestedEvent, ['command']) ||
-      this.pickString(nestedInput, ['command']);
+      this.pickString(nestedInput, ['command']) ||
+      this.pickString(item, ['command']) ||
+      this.pickString(itemInput, ['command']);
 
     let summary = 'Agent requested elevated permissions';
     if (toolName) {
@@ -750,7 +956,7 @@ export class AgentManager extends EventEmitter {
 
     try {
       if (agentProcess.detached && process.platform !== 'win32') {
-        // Kill the process group so Claude and its MCP subprocesses stop together.
+        // Kill the process group so the CLI and its MCP subprocesses stop together.
         process.kill(-pid, signal);
       } else {
         agentProcess.process.kill(signal);

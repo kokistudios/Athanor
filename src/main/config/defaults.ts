@@ -22,6 +22,10 @@ export const defaultConfig: AthanorConfig = {
     default_model: 'sonnet',
     default_permission_mode: 'default',
   },
+  codex: {
+    path: 'codex',
+    default_model: 'gpt-5-codex',
+  },
   preferences: {
     theme: 'dark',
     message_preview_length: 500,
