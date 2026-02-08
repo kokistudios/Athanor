@@ -55,6 +55,7 @@ export interface SessionTable {
   current_phase: number | null;
   context: string | null;
   git_strategy: string | null;
+  loop_state: string | null;
   created_at: Generated<string>;
   completed_at: string | null;
 }
@@ -67,6 +68,9 @@ export interface AgentTable {
   worktree_path: string | null;
   branch: string | null;
   claude_session_id: string | null;
+  worktree_manifest: string | null;
+  phase_summary: string | null;
+  completion_signal: string | null;
   status: Generated<string>;
   spawned_by: string | null;
   created_at: Generated<string>;
@@ -128,10 +132,18 @@ export interface ApprovalTable {
   resolved_at: string | null;
 }
 
+export interface WorkspaceRepoTable {
+  workspace_id: string;
+  repo_id: string;
+  ordinal: number;
+  created_at: Generated<string>;
+}
+
 export interface Database {
   users: UserTable;
   repos: RepoTable;
   workspaces: WorkspaceTable;
+  workspace_repos: WorkspaceRepoTable;
   workflows: WorkflowTable;
   workflow_phases: WorkflowPhaseTable;
   sessions: SessionTable;

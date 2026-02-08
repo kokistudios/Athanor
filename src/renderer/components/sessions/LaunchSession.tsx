@@ -1,8 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { TransparentMarkdownEditor } from '../shared/TransparentMarkdownEditor';
 import { GitStrategyPicker } from '../shared/GitStrategyPicker';
-import { Plus, Rocket, X } from 'lucide-react';
+import { Plus, Rocket, X, GitBranch } from 'lucide-react';
 import type { GitStrategy } from '../../../shared/types/workflow-phase';
+
+interface Repo {
+  id: string;
+  name: string;
+  local_path: string;
+}
 
 interface Workspace {
   id: string;
@@ -28,6 +34,7 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
   const [description, setDescription] = useState('');
   const [context, setContext] = useState('');
   const [gitStrategy, setGitStrategy] = useState<GitStrategy | null>(null);
+  const [workspaceRepos, setWorkspaceRepos] = useState<Repo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -47,6 +54,26 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
     };
     if (expanded) loadData();
   }, [expanded]);
+
+  // Load repos when workspace changes
+  useEffect(() => {
+    if (!selectedWorkspace) {
+      setWorkspaceRepos([]);
+      return;
+    }
+    const loadRepos = async () => {
+      try {
+        const repos = (await window.athanor.invoke(
+          'db:workspace-repos' as never,
+          selectedWorkspace,
+        )) as Repo[];
+        setWorkspaceRepos(repos);
+      } catch {
+        setWorkspaceRepos([]);
+      }
+    };
+    void loadRepos();
+  }, [selectedWorkspace]);
 
   const handleLaunch = async () => {
     if (!selectedWorkspace || !selectedWorkflow) return;
@@ -130,6 +157,21 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
           ))}
         </select>
       </div>
+
+      {/* Workspace repos info */}
+      {selectedWorkspace && workspaceRepos.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {workspaceRepos.map((r) => (
+            <span
+              key={r.id}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-3 text-[0.6875rem] text-text-secondary"
+            >
+              <GitBranch size={9} strokeWidth={2} className="text-text-tertiary" />
+              {r.name}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="mb-3">
         <select

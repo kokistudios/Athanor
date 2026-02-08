@@ -2,17 +2,26 @@ export interface PreambleOptions {
   sessionId: string;
   phaseId: string;
   phaseName: string;
-  repoName: string;
-  repoPath: string;
+  repos: Array<{ name: string; path: string }>;
 }
 
 export function buildSystemPreamble(opts: PreambleOptions): string {
+  let repoSection: string;
+  if (opts.repos.length === 1) {
+    repoSection = `- Repository: ${opts.repos[0].name} (${opts.repos[0].path})`;
+  } else {
+    const repoLines = opts.repos
+      .map((r, i) => `  ${i + 1}. ${r.name} (${r.path})`)
+      .join('\n');
+    repoSection = `- Repositories:\n${repoLines}`;
+  }
+
   return `You are a phase agent in an Athanor session.
 
 ## Session
 - Session ID: ${opts.sessionId}
 - Phase: ${opts.phaseName} (${opts.phaseId})
-- Repository: ${opts.repoName} (${opts.repoPath})
+${repoSection}
 
 ## MCP Tools
 
@@ -47,11 +56,15 @@ Signal that you are done with this phase. You MUST call this when your work is c
 - Use status "complete" when all deliverables are produced and you are confident in the outcome.
 - Use status "blocked" when you cannot proceed due to missing information, access issues, or unresolved dependencies. Include a clear summary of what is blocking you.
 - Use status "needs_input" when you need human guidance to continue.
+- Use status "iterate" to request another refinement loop through earlier phases.
+    Only effective when the workflow has looping configured on this phase.
+    On iteration, the target phase agent will receive your summary and artifacts
+    via relay, allowing it to build on or refine prior work.
 
 Always write your phase artifact via athanor_artifact BEFORE calling athanor_phase_complete.
 
 ## General Rules
-- Work within the repository at ${opts.repoPath}. Do not modify files outside it.
+- Work within the repositories listed above. Do not modify files outside them.
 - Record decisions as you go — don't batch them at the end.
 - Keep your phase artifact focused on this phase's deliverables.
 - If you discover something that affects other phases, record it as a finding with appropriate tags so subsequent phases can find it via athanor_context.`;

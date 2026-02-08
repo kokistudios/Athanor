@@ -3,7 +3,7 @@ import { TransparentMarkdownEditor } from '../shared/TransparentMarkdownEditor';
 import { GitStrategyPicker } from '../shared/GitStrategyPicker';
 import { ChevronRight, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
-import type { CliAgentType, PhasePermissionMode } from '../../../shared/types/domain';
+import type { CliAgentType, LoopCondition, PhasePermissionMode, RelayMode } from '../../../shared/types/domain';
 import type { GitStrategy } from '../../../shared/types/workflow-phase';
 
 export interface PhaseData {
@@ -16,6 +16,10 @@ export interface PhaseData {
   permission_mode: PhasePermissionMode;
   agent_type: CliAgentType;
   git_strategy: GitStrategy | null;
+  relay: RelayMode;
+  loop_to: number | null;
+  max_iterations: number | null;
+  loop_condition: LoopCondition | null;
 }
 
 interface PhaseEditorProps {
@@ -83,6 +87,16 @@ export function PhaseEditor({
             {phase.git_strategy.mode === 'main'
               ? 'Main'
               : `Branch: ${phase.git_strategy.branch}`}
+          </span>
+        )}
+        {phase.relay !== 'off' && (
+          <span className="badge badge-blue" style={{ flexShrink: 0 }}>
+            Relay
+          </span>
+        )}
+        {phase.loop_to !== null && (
+          <span className="badge badge-violet" style={{ flexShrink: 0 }}>
+            Loop → {phase.loop_to + 1}
           </span>
         )}
         <span
@@ -174,6 +188,91 @@ export function PhaseEditor({
                 allowInherit
               />
             </div>
+
+            <div className="phase-field-row">
+              <div className="phase-field" style={{ flex: 1, marginBottom: 0 }}>
+                <label className="phase-label">Artifact Relay</label>
+                <div className="phase-select-wrap">
+                  <select
+                    value={phase.relay}
+                    onChange={(e) =>
+                      onChange({ ...phase, relay: e.target.value as RelayMode })
+                    }
+                    className="phase-select"
+                  >
+                    <option value="off">Off</option>
+                    <option value="summary">Summaries only</option>
+                    <option value="previous">Previous phase</option>
+                    <option value="all">All prior phases</option>
+                  </select>
+                </div>
+              </div>
+              <div className="phase-field" style={{ flex: 1, marginBottom: 0 }}>
+                <label className="phase-label">Loop To Phase</label>
+                <div className="phase-select-wrap">
+                  <select
+                    value={phase.loop_to === null ? '' : String(phase.loop_to)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      onChange({
+                        ...phase,
+                        loop_to: val === '' ? null : Number(val),
+                        loop_condition: val === '' ? null : phase.loop_condition || 'agent_signal',
+                      });
+                    }}
+                    className="phase-select"
+                  >
+                    <option value="">No loop</option>
+                    {Array.from({ length: index + 1 }, (_, i) => (
+                      <option key={i} value={String(i)}>
+                        Phase {i + 1}{i === index ? ' (self)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {phase.loop_to !== null && (
+              <div className="phase-field-row">
+                <div className="phase-field" style={{ flex: 1, marginBottom: 0 }}>
+                  <label className="phase-label">Loop Trigger</label>
+                  <div className="phase-select-wrap">
+                    <select
+                      value={phase.loop_condition || 'agent_signal'}
+                      onChange={(e) =>
+                        onChange({
+                          ...phase,
+                          loop_condition: e.target.value as LoopCondition,
+                        })
+                      }
+                      className="phase-select"
+                    >
+                      <option value="agent_signal">Agent signal</option>
+                      <option value="approval">Human approval</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="phase-field" style={{ flex: 1, marginBottom: 0 }}>
+                  <label className="phase-label">Max Iterations</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={phase.max_iterations ?? ''}
+                    onChange={(e) => {
+                      const val = e.target.value.trim();
+                      onChange({
+                        ...phase,
+                        max_iterations: val === '' ? null : Number(val),
+                      });
+                    }}
+                    placeholder="No limit"
+                    className="phase-input"
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="phase-field">
               <label className="phase-label">Prompt Template</label>

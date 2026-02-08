@@ -8,6 +8,7 @@ import {
   Clock,
   GitBranch,
   ChevronRight,
+  X,
 } from 'lucide-react';
 
 interface Repo {
@@ -40,7 +41,7 @@ export function WorkspaceDashboard({
 
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
-  const [selectedRepo, setSelectedRepo] = useState('');
+  const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
 
   const [showNewRepo, setShowNewRepo] = useState(false);
@@ -48,6 +49,9 @@ export function WorkspaceDashboard({
   const [newRepoName, setNewRepoName] = useState('');
   const [addingRepo, setAddingRepo] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Per-workspace repo cache for display on cards
+  const [workspaceRepoNames, setWorkspaceRepoNames] = useState<Record<string, string[]>>({});
 
   const loadData = useCallback(async () => {
     try {
@@ -57,6 +61,23 @@ export function WorkspaceDashboard({
       ]);
       setWorkspaces(ws as Workspace[]);
       setRepos(rp as Repo[]);
+
+      // Load repo names for each workspace
+      const repoNamesMap: Record<string, string[]> = {};
+      for (const w of ws as Workspace[]) {
+        try {
+          const wsRepos = (await window.athanor.invoke(
+            'db:workspace-repos' as never,
+            w.id,
+          )) as Repo[];
+          repoNamesMap[w.id] = wsRepos.map((r) => r.name);
+        } catch {
+          // Fall back to legacy single repo
+          const repo = (rp as Repo[]).find((r) => r.id === w.repo_id);
+          repoNamesMap[w.id] = repo ? [repo.name] : [];
+        }
+      }
+      setWorkspaceRepoNames(repoNamesMap);
     } catch (err) {
       console.error('Failed to load workspaces:', err);
     } finally {
@@ -88,7 +109,7 @@ export function WorkspaceDashboard({
         localPath: newRepoPath.trim(),
       })) as Repo;
       setRepos((prev) => [repo, ...prev]);
-      setSelectedRepo(repo.id);
+      setSelectedRepos((prev) => [...prev, repo.id]);
       setShowNewRepo(false);
       setNewRepoPath('');
       setNewRepoName('');
@@ -99,20 +120,30 @@ export function WorkspaceDashboard({
     }
   };
 
+  const handleAddExistingRepo = (repoId: string) => {
+    if (!selectedRepos.includes(repoId)) {
+      setSelectedRepos((prev) => [...prev, repoId]);
+    }
+  };
+
+  const handleRemoveSelectedRepo = (repoId: string) => {
+    setSelectedRepos((prev) => prev.filter((id) => id !== repoId));
+  };
+
   const handleCreate = async () => {
-    if (!newName.trim() || !selectedRepo) return;
+    if (!newName.trim() || selectedRepos.length === 0) return;
     setCreating(true);
     setError(null);
     try {
       const user = (await window.athanor.invoke('db:get-user' as never)) as { id: string };
       const ws = (await window.athanor.invoke('db:create-workspace' as never, {
         userId: user.id,
-        repoId: selectedRepo,
+        repoIds: selectedRepos,
         name: newName.trim(),
       })) as Workspace;
       setShowCreate(false);
       setNewName('');
-      setSelectedRepo('');
+      setSelectedRepos([]);
       await loadData();
       onSelectWorkspace(ws.id);
     } catch (err) {
@@ -134,8 +165,6 @@ export function WorkspaceDashboard({
       />
     );
   }
-
-  const repoById = new Map(repos.map((r) => [r.id, r]));
 
   return (
     <div className="flex flex-col h-full">
@@ -177,27 +206,57 @@ export function WorkspaceDashboard({
               />
 
               <div className="text-[0.6875rem] font-medium text-text-tertiary mb-1.5 uppercase tracking-[0.04em]">
-                Repository
+                Repositories
               </div>
+
+              {/* Selected repos as removable chips */}
+              {selectedRepos.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {selectedRepos.map((repoId) => {
+                    const r = repos.find((repo) => repo.id === repoId);
+                    if (!r) return null;
+                    return (
+                      <span
+                        key={repoId}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-surface-3 text-[0.75rem] text-text-secondary"
+                      >
+                        <GitBranch size={10} strokeWidth={2} className="text-text-tertiary" />
+                        {r.name}
+                        <button
+                          onClick={() => handleRemoveSelectedRepo(repoId)}
+                          className="ml-0.5 text-text-tertiary hover:text-text-primary transition-colors"
+                        >
+                          <X size={11} />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="flex gap-2 items-center mb-2">
                 <select
-                  value={selectedRepo}
-                  onChange={(e) => setSelectedRepo(e.target.value)}
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) handleAddExistingRepo(e.target.value);
+                  }}
                   className="input-base flex-1"
                 >
-                  <option value="">Select repo...</option>
-                  {repos.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name} — {r.local_path}
-                    </option>
-                  ))}
+                  <option value="">Add a repo...</option>
+                  {repos
+                    .filter((r) => !selectedRepos.includes(r.id))
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} — {r.local_path}
+                      </option>
+                    ))}
                 </select>
                 <button
                   onClick={() => setShowNewRepo(!showNewRepo)}
                   className="btn-secondary whitespace-nowrap text-[0.75rem]"
                 >
                   <Plus size={12} className="inline mr-1" />
-                  Add Repo
+                  New Repo
                 </button>
               </div>
 
@@ -241,7 +300,7 @@ export function WorkspaceDashboard({
 
               <button
                 onClick={handleCreate}
-                disabled={creating || !newName.trim() || !selectedRepo}
+                disabled={creating || !newName.trim() || selectedRepos.length === 0}
                 className="btn-primary"
               >
                 {creating ? 'Creating...' : 'Create Workspace'}
@@ -253,7 +312,11 @@ export function WorkspaceDashboard({
 
           <div className="stagger-children">
             {workspaces.map((ws) => {
-              const repo = repoById.get(ws.repo_id);
+              const repoNames = workspaceRepoNames[ws.id] || [];
+              const repoDisplay =
+                repoNames.length <= 3
+                  ? repoNames.join(', ')
+                  : `${repoNames.slice(0, 3).join(', ')} +${repoNames.length - 3}`;
               return (
                 <div
                   key={ws.id}
@@ -269,13 +332,17 @@ export function WorkspaceDashboard({
                     {/* Content */}
                     <div className="min-w-0 flex-1">
                       <div className="card-title">{ws.name}</div>
-                      {repo && (
+                      {repoNames.length > 0 && (
                         <div className="flex items-center gap-2 mt-1">
                           <GitBranch size={11} strokeWidth={2} className="text-text-tertiary" />
-                          <span className="text-[0.75rem] text-text-secondary">{repo.name}</span>
-                          <span className="font-mono text-[0.625rem] text-text-tertiary opacity-60 truncate">
-                            {repo.local_path}
+                          <span className="text-[0.75rem] text-text-secondary truncate">
+                            {repoDisplay}
                           </span>
+                          {repoNames.length > 1 && (
+                            <span className="text-[0.625rem] text-text-tertiary opacity-60">
+                              {repoNames.length} repos
+                            </span>
+                          )}
                         </div>
                       )}
                       <div className="card-meta mt-1.5">

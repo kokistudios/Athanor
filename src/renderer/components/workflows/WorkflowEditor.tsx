@@ -3,13 +3,25 @@ import { PhaseEditor, type PhaseData } from './PhaseEditor';
 import { ArrowLeft, Plus, Save, Workflow, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import type { GitStrategy, WorkflowPhaseConfig } from '../../../shared/types/workflow-phase';
-import { CLI_AGENT_TYPES, GIT_STRATEGY_MODES } from '../../../shared/types/domain';
+import { CLI_AGENT_TYPES, GIT_STRATEGY_MODES, LOOP_CONDITIONS, RELAY_MODES } from '../../../shared/types/domain';
+import type { LoopCondition, RelayMode } from '../../../shared/types/domain';
 
 const CLI_AGENT_TYPE_SET = new Set<string>(CLI_AGENT_TYPES);
 const GIT_STRATEGY_MODE_SET = new Set<string>(GIT_STRATEGY_MODES);
+const RELAY_MODE_SET = new Set<string>(RELAY_MODES);
+const LOOP_CONDITION_SET = new Set<string>(LOOP_CONDITIONS);
 
-function parsePhaseConfig(config: string | null): Required<Pick<PhaseData, 'permission_mode' | 'agent_type' | 'git_strategy'>> {
-  if (!config) return { permission_mode: 'default', agent_type: 'claude', git_strategy: null };
+function parsePhaseConfig(config: string | null): Required<Pick<PhaseData, 'permission_mode' | 'agent_type' | 'git_strategy' | 'relay' | 'loop_to' | 'max_iterations' | 'loop_condition'>> {
+  const defaults = {
+    permission_mode: 'default' as const,
+    agent_type: 'claude' as const,
+    git_strategy: null as GitStrategy | null,
+    relay: 'summary' as RelayMode,
+    loop_to: null as number | null,
+    max_iterations: null as number | null,
+    loop_condition: null as LoopCondition | null,
+  };
+  if (!config) return defaults;
   try {
     const parsed = JSON.parse(config) as WorkflowPhaseConfig;
     const permission_mode =
@@ -22,9 +34,19 @@ function parsePhaseConfig(config: string | null): Required<Pick<PhaseData, 'perm
     if (parsed.git_strategy && GIT_STRATEGY_MODE_SET.has(parsed.git_strategy.mode)) {
       git_strategy = parsed.git_strategy;
     }
-    return { permission_mode, agent_type, git_strategy };
+    const relay: RelayMode =
+      typeof parsed.relay === 'string' && RELAY_MODE_SET.has(parsed.relay)
+        ? (parsed.relay as RelayMode)
+        : 'summary';
+    const loop_to = typeof parsed.loop_to === 'number' ? parsed.loop_to : null;
+    const max_iterations = typeof parsed.max_iterations === 'number' ? parsed.max_iterations : null;
+    const loop_condition: LoopCondition | null =
+      typeof parsed.loop_condition === 'string' && LOOP_CONDITION_SET.has(parsed.loop_condition)
+        ? (parsed.loop_condition as LoopCondition)
+        : null;
+    return { permission_mode, agent_type, git_strategy, relay, loop_to, max_iterations, loop_condition };
   } catch {
-    return { permission_mode: 'default', agent_type: 'claude', git_strategy: null };
+    return defaults;
   }
 }
 
@@ -83,6 +105,10 @@ export function WorkflowEditor({
             permission_mode: phaseConfig.permission_mode,
             agent_type: phaseConfig.agent_type,
             git_strategy: phaseConfig.git_strategy,
+            relay: phaseConfig.relay,
+            loop_to: phaseConfig.loop_to,
+            max_iterations: phaseConfig.max_iterations,
+            loop_condition: phaseConfig.loop_condition,
           };
         }),
       );
@@ -103,6 +129,10 @@ export function WorkflowEditor({
         permission_mode: 'default',
         agent_type: 'claude',
         git_strategy: null,
+        relay: 'summary',
+        loop_to: null,
+        max_iterations: null,
+        loop_condition: null,
       },
     ]);
     setDirty(true);
@@ -123,6 +153,10 @@ export function WorkflowEditor({
           permission_mode: p.permission_mode,
           agent_type: p.agent_type,
           ...(p.git_strategy ? { git_strategy: p.git_strategy } : {}),
+          ...(p.relay !== 'summary' ? { relay: p.relay } : {}),
+          ...(p.loop_to !== null ? { loop_to: p.loop_to } : {}),
+          ...(p.max_iterations !== null ? { max_iterations: p.max_iterations } : {}),
+          ...(p.loop_condition !== null ? { loop_condition: p.loop_condition } : {}),
         },
       }));
 

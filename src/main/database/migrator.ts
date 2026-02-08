@@ -6,6 +6,8 @@ import * as m002 from './migrations/002_add_waiting_approval_status';
 import * as m003 from './migrations/003_add_session_description';
 import * as m004 from './migrations/004_add_artifact_pinned';
 import * as m005 from './migrations/005_add_session_git_strategy';
+import * as m006 from './migrations/006_multi_repo_workspaces';
+import * as m007 from './migrations/007_relay_and_looping';
 
 const migrations: Record<string, Migration> = {
   '001_initial_schema': m001,
@@ -13,6 +15,8 @@ const migrations: Record<string, Migration> = {
   '003_add_session_description': m003,
   '004_add_artifact_pinned': m004,
   '005_add_session_git_strategy': m005,
+  '006_multi_repo_workspaces': m006,
+  '007_relay_and_looping': m007,
 };
 
 class InlineMigrationProvider implements MigrationProvider {

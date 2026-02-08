@@ -28,6 +28,7 @@ export interface SpawnAgentOptions {
   workingDir: string;
   worktreePath?: string;
   branch?: string;
+  worktreeManifest?: string;
   allowedTools?: string[] | null;
   agents?: Record<string, unknown>;
   permissionMode?: string;
@@ -83,6 +84,7 @@ export class AgentManager extends EventEmitter {
         worktree_path: opts.worktreePath || null,
         branch: opts.branch || null,
         claude_session_id: opts.claudeSessionId || null,
+        worktree_manifest: opts.worktreeManifest || null,
         status: 'spawning',
       })
       .execute();
@@ -624,7 +626,7 @@ export class AgentManager extends EventEmitter {
   }> {
     const agent = await this.db
       .selectFrom('agents')
-      .select(['id', 'session_id', 'phase_id', 'name', 'worktree_path', 'claude_session_id', 'status'])
+      .select(['id', 'session_id', 'phase_id', 'name', 'worktree_path', 'worktree_manifest', 'claude_session_id', 'status'])
       .where('id', '=', agentId)
       .executeTakeFirst();
 
@@ -636,25 +638,59 @@ export class AgentManager extends EventEmitter {
       throw new Error(`Agent ${agentId} is not waiting for input`);
     }
 
-    // Resolve working directory: use worktree_path if available, otherwise fall back to repo path
-    let workingDir = agent.worktree_path;
+    // Resolve working directory:
+    // 1. worktree_manifest → parent dir (dirname of first entry)
+    // 2. worktree_path → single worktree
+    // 3. fall back to workspace repos (primary repo)
+    let workingDir: string | null = null;
+
+    if (agent.worktree_manifest) {
+      try {
+        const manifest = JSON.parse(agent.worktree_manifest) as Array<{ worktreePath: string }>;
+        if (manifest.length > 0) {
+          workingDir = path.dirname(manifest[0].worktreePath);
+        }
+      } catch {
+        // ignore malformed manifest, fall through
+      }
+    }
+
+    if (!workingDir && agent.worktree_path) {
+      workingDir = agent.worktree_path;
+    }
+
     if (!workingDir) {
       const session = await this.db
         .selectFrom('sessions')
         .select('workspace_id')
         .where('id', '=', agent.session_id)
         .executeTakeFirstOrThrow();
-      const workspace = await this.db
-        .selectFrom('workspaces')
-        .select('repo_id')
-        .where('id', '=', session.workspace_id)
-        .executeTakeFirstOrThrow();
-      const repo = await this.db
-        .selectFrom('repos')
-        .select('local_path')
-        .where('id', '=', workspace.repo_id)
-        .executeTakeFirstOrThrow();
-      workingDir = repo.local_path;
+
+      // Try workspace_repos join table first
+      const wsRepo = await this.db
+        .selectFrom('workspace_repos')
+        .innerJoin('repos', 'repos.id', 'workspace_repos.repo_id')
+        .select('repos.local_path')
+        .where('workspace_repos.workspace_id', '=', session.workspace_id)
+        .orderBy('workspace_repos.ordinal', 'asc')
+        .executeTakeFirst();
+
+      if (wsRepo) {
+        workingDir = wsRepo.local_path;
+      } else {
+        // Fall back to legacy repo_id
+        const workspace = await this.db
+          .selectFrom('workspaces')
+          .select('repo_id')
+          .where('id', '=', session.workspace_id)
+          .executeTakeFirstOrThrow();
+        const repo = await this.db
+          .selectFrom('repos')
+          .select('local_path')
+          .where('id', '=', workspace.repo_id)
+          .executeTakeFirstOrThrow();
+        workingDir = repo.local_path;
+      }
     }
 
     const phase = await this.db

@@ -6,7 +6,7 @@ import type { Database } from '../../shared/types/database';
 export const phaseCompleteSchema = z.object({
   summary: z.string().describe('Brief summary of what was accomplished in this phase'),
   status: z
-    .enum(['complete', 'blocked', 'needs_input'])
+    .enum(['complete', 'blocked', 'needs_input', 'iterate'])
     .default('complete')
     .describe('Phase completion status'),
 });
@@ -17,19 +17,21 @@ export async function athanorPhaseComplete(
   sessionId: string,
   params: z.infer<typeof phaseCompleteSchema>,
 ): Promise<string> {
-  if (params.status === 'complete') {
+  if (params.status === 'complete' || params.status === 'iterate') {
     await db
       .updateTable('agents')
       .set({
         status: 'completed',
         completed_at: new Date().toISOString(),
+        phase_summary: params.summary,
+        completion_signal: params.status === 'iterate' ? 'iterate' : 'complete',
       })
       .where('id', '=', agentId)
       .execute();
 
     return JSON.stringify({
       status: 'completed',
-      message: `Phase marked as complete. Summary: ${params.summary}`,
+      message: `Phase marked as ${params.status}. Summary: ${params.summary}`,
     });
   } else if (params.status === 'blocked') {
     await db.updateTable('agents').set({ status: 'waiting' }).where('id', '=', agentId).execute();

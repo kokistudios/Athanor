@@ -30,6 +30,7 @@ export function createServices(db: Kysely<Database>, config: AthanorConfig): Ser
     agentManager,
     approvalRouter,
     worktreeManager,
+    contentStore,
     config,
   );
 

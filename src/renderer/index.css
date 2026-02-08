@@ -1028,6 +1028,10 @@ button:disabled {
   animation: pulse-dot 2s ease-in-out infinite;
 }
 
+.phase-node-loop {
+  box-shadow: 0 0 0 3px var(--color-surface-0), 0 0 0 4.5px var(--color-accent-violet);
+}
+
 .phase-connector {
   height: 1.5px;
   flex: 1;

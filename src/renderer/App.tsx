@@ -63,14 +63,18 @@ export function App(): React.ReactElement {
   // Toast on phase advancement
   useEffect(() => {
     const cleanup = window.athanor.on('phase:advanced' as never, (data: unknown) => {
-      const { phaseName, phaseNumber, totalPhases } = data as {
+      const { phaseName, phaseNumber, totalPhases, isLoop, iteration } = data as {
         sessionId: string;
         phaseName: string;
         phaseNumber: number;
         totalPhases: number;
+        isLoop?: boolean;
+        iteration?: number;
       };
+      const iterSuffix = isLoop && iteration ? ` (iteration ${iteration})` : '';
+      const verb = isLoop ? 'restarted' : 'started';
       addToast({
-        message: `Phase ${phaseNumber}/${totalPhases} started: ${phaseName}`,
+        message: `Phase ${phaseNumber}/${totalPhases} ${verb}: ${phaseName}${iterSuffix}`,
         variant: 'success',
         onClick: () => setView({ kind: 'sessions' }),
       });

@@ -17,6 +17,7 @@ import {
   Lightbulb,
   MessageSquareText,
   Clock,
+  RefreshCw,
 } from 'lucide-react';
 import { secureMarkdownComponents } from '../shared/markdown-security';
 import { ApprovalCard } from '../approvals/ApprovalCard';
@@ -31,6 +32,7 @@ interface SessionData {
   context: string | null;
   created_at: string;
   completed_at: string | null;
+  loop_state: string | null;
   agents: Array<{
     id: string;
     name: string;
@@ -52,6 +54,12 @@ interface SessionData {
     pinned: number;
     created_at: string;
     phase_id: string;
+  }>;
+  workflow_phases: Array<{
+    id: string;
+    name: string;
+    ordinal: number;
+    config: string | null;
   }>;
 }
 
@@ -331,6 +339,21 @@ export function SessionDetail({
               Phase {session.current_phase + 1}
             </span>
           )}
+          {(() => {
+            if (!session.loop_state) return null;
+            try {
+              const ls = JSON.parse(session.loop_state) as { iterations?: number };
+              if (ls.iterations && ls.iterations > 0) {
+                return (
+                  <span className="badge badge-violet flex items-center gap-1">
+                    <RefreshCw size={9} strokeWidth={2.5} />
+                    Iteration {ls.iterations + 1}
+                  </span>
+                );
+              }
+            } catch { /* ignore */ }
+            return null;
+          })()}
           <div className="ml-auto flex items-center gap-1">
             <button
               onClick={() => setShowDeleteConfirm(true)}
@@ -359,6 +382,44 @@ export function SessionDetail({
             )}
             <span className="opacity-40">{session.id.slice(0, 12)}</span>
           </div>
+
+          {/* Phase progress bar */}
+          {session.workflow_phases && session.workflow_phases.length > 0 && (
+            <div className="flex items-center gap-0 mb-8 px-1">
+              {session.workflow_phases.map((wp, i) => {
+                const isCurrent = wp.ordinal === session.current_phase;
+                const isCompleted =
+                  session.current_phase !== null && wp.ordinal < session.current_phase;
+                const isSessionDone = session.status === 'completed';
+                const hasLoop = (() => {
+                  if (!wp.config) return false;
+                  try {
+                    const cfg = JSON.parse(wp.config) as { loop_to?: number | null };
+                    return cfg.loop_to !== undefined && cfg.loop_to !== null;
+                  } catch { return false; }
+                })();
+                let nodeClass = 'phase-node';
+                if (isSessionDone || isCompleted) nodeClass += ' phase-node-completed';
+                if (isCurrent && !isSessionDone) nodeClass += ' phase-node-current';
+                if (hasLoop) nodeClass += ' phase-node-loop';
+
+                let connectorClass = 'phase-connector';
+                if (isCompleted || isSessionDone) connectorClass += ' phase-connector-completed';
+
+                return (
+                  <React.Fragment key={wp.id}>
+                    <div
+                      className={nodeClass}
+                      title={`Phase ${wp.ordinal + 1}: ${wp.name}`}
+                    />
+                    {i < session.workflow_phases.length - 1 && (
+                      <div className={connectorClass} />
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          )}
 
           {/* Context */}
           {session.context && (

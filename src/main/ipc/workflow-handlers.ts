@@ -3,7 +3,7 @@ import type { Kysely } from 'kysely';
 import { z } from 'zod';
 import type { Database } from '../../shared/types/database';
 import type { ServiceRegistry } from '../services/service-registry';
-import { CLI_AGENT_TYPES, GIT_BRANCH_ISOLATIONS, PHASE_PERMISSION_MODES } from '../../shared/types/domain';
+import { CLI_AGENT_TYPES, GIT_BRANCH_ISOLATIONS, LOOP_CONDITIONS, PHASE_PERMISSION_MODES, RELAY_MODES } from '../../shared/types/domain';
 import { registerSecureIpcHandler } from './security';
 
 const uuidSchema = z.string().uuid();
@@ -24,6 +24,10 @@ const workflowPhaseConfigSchema = z
     permission_mode: permissionModeSchema.optional(),
     agent_type: cliAgentTypeSchema.optional(),
     git_strategy: gitStrategySchema.optional(),
+    relay: z.enum(RELAY_MODES).optional(),
+    loop_to: z.number().int().min(0).optional(),
+    max_iterations: z.number().int().min(1).max(100).optional(),
+    loop_condition: z.enum(LOOP_CONDITIONS).optional(),
   })
   .strict();
 
@@ -309,7 +313,15 @@ export function registerWorkflowHandlers(
       .orderBy('created_at', 'asc')
       .execute();
 
-    return { ...session, agents, decisions, artifacts };
+    // Include workflow phases for phase progress visualization
+    const workflowPhases = await db
+      .selectFrom('workflow_phases')
+      .select(['id', 'name', 'ordinal', 'config'])
+      .where('workflow_id', '=', session.workflow_id)
+      .orderBy('ordinal', 'asc')
+      .execute();
+
+    return { ...session, agents, decisions, artifacts, workflow_phases: workflowPhases };
   });
 
   registerSecureIpcHandler(
@@ -364,20 +376,21 @@ export function registerWorkflowHandlers(
         .filter((a) => a.sessionId === sessionId);
       await Promise.all(activeAgents.map((agent) => services.agentManager.killAgent(agent.id)));
 
-      // Collect agent info before deleting rows — we need IDs and worktree paths
+      // Collect agent info before deleting rows — we need IDs, worktree paths, and manifests
       const agentRows = await db
         .selectFrom('agents')
-        .select(['id', 'worktree_path'])
+        .select(['id', 'worktree_path', 'worktree_manifest'])
         .where('session_id', '=', sessionId)
         .execute();
       const ids = agentRows.map((a) => a.id);
-      const worktreePaths = agentRows
-        .map((a) => a.worktree_path)
-        .filter((p): p is string => !!p);
 
-      // Look up the repo path for git worktree removal
+      // Look up the repo path for legacy git worktree removal
       let repoPath: string | null = null;
-      if (worktreePaths.length > 0) {
+      const legacyWorktreePaths = agentRows
+        .filter((a): a is typeof a & { worktree_path: string } => !a.worktree_manifest && !!a.worktree_path)
+        .map((a) => a.worktree_path);
+
+      if (legacyWorktreePaths.length > 0) {
         const session = await db
           .selectFrom('sessions')
           .select('workspace_id')
@@ -420,14 +433,31 @@ export function registerWorkflowHandlers(
       }
       await services.contentStore.deleteTree(`sessions/${sessionId}`);
 
-      // 6. Remove git worktrees
-      for (const wtPath of worktreePaths) {
-        try {
-          if (repoPath) {
-            await services.worktreeManager.removeWorktree(repoPath, wtPath);
+      // 6. Remove git worktrees — check worktree_manifest first, then legacy worktree_path
+      for (const agent of agentRows) {
+        if (agent.worktree_manifest) {
+          try {
+            const manifest = JSON.parse(agent.worktree_manifest) as Array<{
+              repoPath: string;
+              worktreePath: string;
+            }>;
+            await services.worktreeManager.removeMultiRepoWorktrees(
+              manifest.map((e) => ({
+                repoId: '',
+                repoPath: e.repoPath,
+                worktreePath: e.worktreePath,
+                branch: '',
+              })),
+            );
+          } catch (err) {
+            console.warn(`Failed to remove multi-repo worktrees for agent ${agent.id}:`, err);
           }
-        } catch (err) {
-          console.warn(`Failed to remove worktree ${wtPath}:`, err);
+        } else if (agent.worktree_path && repoPath) {
+          try {
+            await services.worktreeManager.removeWorktree(repoPath, agent.worktree_path);
+          } catch (err) {
+            console.warn(`Failed to remove worktree ${agent.worktree_path}:`, err);
+          }
         }
       }
 
@@ -442,19 +472,48 @@ export function registerWorkflowHandlers(
     z.tuple([uuidSchema]),
     async (_event, workspaceId) => {
       try {
-        const workspace = await db
-          .selectFrom('workspaces')
-          .select('repo_id')
-          .where('id', '=', workspaceId)
-          .executeTakeFirstOrThrow();
-        const repo = await db
-          .selectFrom('repos')
-          .select('local_path')
-          .where('id', '=', workspace.repo_id)
-          .executeTakeFirstOrThrow();
-        return await services.worktreeManager.listBranches(repo.local_path);
+        // Look up all repos via workspace_repos
+        const wsRepos = await db
+          .selectFrom('workspace_repos')
+          .innerJoin('repos', 'repos.id', 'workspace_repos.repo_id')
+          .select(['repos.id', 'repos.name', 'repos.local_path'])
+          .where('workspace_repos.workspace_id', '=', workspaceId)
+          .orderBy('workspace_repos.ordinal', 'asc')
+          .execute();
+
+        if (wsRepos.length <= 1) {
+          // Single repo or legacy: return flat string[] for backward compat
+          let repoPath: string;
+          if (wsRepos.length === 1) {
+            repoPath = wsRepos[0].local_path;
+          } else {
+            const workspace = await db
+              .selectFrom('workspaces')
+              .select('repo_id')
+              .where('id', '=', workspaceId)
+              .executeTakeFirstOrThrow();
+            const repo = await db
+              .selectFrom('repos')
+              .select('local_path')
+              .where('id', '=', workspace.repo_id)
+              .executeTakeFirstOrThrow();
+            repoPath = repo.local_path;
+          }
+          return await services.worktreeManager.listBranches(repoPath);
+        }
+
+        // Multi repo: return Record<repoId, { repoName, branches[] }>
+        const result: Record<string, { repoName: string; branches: string[] }> = {};
+        for (const repo of wsRepos) {
+          try {
+            const branches = await services.worktreeManager.listBranches(repo.local_path);
+            result[repo.id] = { repoName: repo.name, branches };
+          } catch {
+            result[repo.id] = { repoName: repo.name, branches: [] };
+          }
+        }
+        return result;
       } catch {
-        // Repo path may not exist or not be a git repository
         return [];
       }
     },

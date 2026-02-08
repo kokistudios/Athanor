@@ -37,7 +37,8 @@ const createWorkspaceArgsSchema = z.tuple([
   z
     .object({
       userId: uuidSchema,
-      repoId: uuidSchema,
+      repoId: uuidSchema.optional(),
+      repoIds: z.array(uuidSchema).optional(),
       name: z.string().min(1).max(256),
       config: z.unknown().optional(),
     })
@@ -49,7 +50,6 @@ const updateWorkspaceArgsSchema = z.tuple([
     .object({
       id: uuidSchema,
       name: optionalStringSchema,
-      repoId: uuidSchema.optional(),
       config: z.unknown().optional(),
     })
     .strict(),
@@ -128,12 +128,27 @@ export function registerDbHandlers(db: Kysely<Database>, mainWindow: BrowserWind
         .where('id', '=', id)
         .executeTakeFirst();
       if (!workspace) return null;
-      const repo = await db
-        .selectFrom('repos')
-        .selectAll()
-        .where('id', '=', workspace.repo_id)
-        .executeTakeFirst();
-      return { ...workspace, repo };
+
+      // Load repos from join table
+      const repos = await db
+        .selectFrom('workspace_repos')
+        .innerJoin('repos', 'repos.id', 'workspace_repos.repo_id')
+        .selectAll('repos')
+        .where('workspace_repos.workspace_id', '=', id)
+        .orderBy('workspace_repos.ordinal', 'asc')
+        .execute();
+
+      // Fall back to legacy repo_id if join table is empty
+      if (repos.length === 0 && workspace.repo_id) {
+        const legacyRepo = await db
+          .selectFrom('repos')
+          .selectAll()
+          .where('id', '=', workspace.repo_id)
+          .executeTakeFirst();
+        return { ...workspace, repos: legacyRepo ? [legacyRepo] : [], repo: legacyRepo };
+      }
+
+      return { ...workspace, repos, repo: repos[0] || null };
     },
   );
 
@@ -143,16 +158,41 @@ export function registerDbHandlers(db: Kysely<Database>, mainWindow: BrowserWind
     createWorkspaceArgsSchema,
     async (_event, opts) => {
       const id = crypto.randomUUID();
+      // Determine repo IDs: prefer repoIds array, fall back to single repoId
+      const repoIds = opts.repoIds && opts.repoIds.length > 0
+        ? opts.repoIds
+        : opts.repoId
+          ? [opts.repoId]
+          : [];
+
+      if (repoIds.length === 0) {
+        throw new Error('At least one repository is required');
+      }
+
+      // Write legacy repo_id (first repo) for backward compat
       await db
         .insertInto('workspaces')
         .values({
           id,
           user_id: opts.userId,
-          repo_id: opts.repoId,
+          repo_id: repoIds[0],
           name: opts.name,
           config: opts.config ? JSON.stringify(opts.config) : null,
         })
         .execute();
+
+      // Insert into workspace_repos join table
+      for (let i = 0; i < repoIds.length; i++) {
+        await db
+          .insertInto('workspace_repos')
+          .values({
+            workspace_id: id,
+            repo_id: repoIds[i],
+            ordinal: i,
+          })
+          .execute();
+      }
+
       return db.selectFrom('workspaces').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
     },
   );
@@ -164,7 +204,6 @@ export function registerDbHandlers(db: Kysely<Database>, mainWindow: BrowserWind
     async (_event, opts) => {
       const updates: Record<string, unknown> = {};
       if (opts.name !== undefined) updates.name = opts.name;
-      if (opts.repoId !== undefined) updates.repo_id = opts.repoId;
       if (opts.config !== undefined)
         updates.config = opts.config ? JSON.stringify(opts.config) : null;
       if (Object.keys(updates).length > 0) {
@@ -184,6 +223,89 @@ export function registerDbHandlers(db: Kysely<Database>, mainWindow: BrowserWind
     z.tuple([uuidSchema]),
     async (_event, id) => {
       await db.deleteFrom('workspaces').where('id', '=', id).execute();
+      return { success: true };
+    },
+  );
+
+  // Workspace repos management
+  registerSecureIpcHandler(
+    mainWindow,
+    'db:workspace-repos',
+    z.tuple([uuidSchema]),
+    async (_event, workspaceId) => {
+      return db
+        .selectFrom('workspace_repos')
+        .innerJoin('repos', 'repos.id', 'workspace_repos.repo_id')
+        .selectAll('repos')
+        .select('workspace_repos.ordinal')
+        .where('workspace_repos.workspace_id', '=', workspaceId)
+        .orderBy('workspace_repos.ordinal', 'asc')
+        .execute();
+    },
+  );
+
+  registerSecureIpcHandler(
+    mainWindow,
+    'db:workspace-add-repo',
+    z.tuple([z.object({ workspaceId: uuidSchema, repoId: uuidSchema }).strict()]),
+    async (_event, opts) => {
+      // Determine next ordinal
+      const last = await db
+        .selectFrom('workspace_repos')
+        .select('ordinal')
+        .where('workspace_id', '=', opts.workspaceId)
+        .orderBy('ordinal', 'desc')
+        .executeTakeFirst();
+      const nextOrdinal = last ? last.ordinal + 1 : 0;
+
+      await db
+        .insertInto('workspace_repos')
+        .values({
+          workspace_id: opts.workspaceId,
+          repo_id: opts.repoId,
+          ordinal: nextOrdinal,
+        })
+        .execute();
+
+      // Update legacy repo_id if this is the first repo
+      if (nextOrdinal === 0) {
+        await db
+          .updateTable('workspaces')
+          .set({ repo_id: opts.repoId })
+          .where('id', '=', opts.workspaceId)
+          .execute();
+      }
+
+      return { success: true };
+    },
+  );
+
+  registerSecureIpcHandler(
+    mainWindow,
+    'db:workspace-remove-repo',
+    z.tuple([z.object({ workspaceId: uuidSchema, repoId: uuidSchema }).strict()]),
+    async (_event, opts) => {
+      await db
+        .deleteFrom('workspace_repos')
+        .where('workspace_id', '=', opts.workspaceId)
+        .where('repo_id', '=', opts.repoId)
+        .execute();
+
+      // Update legacy repo_id to the new primary (ordinal 0)
+      const primary = await db
+        .selectFrom('workspace_repos')
+        .select('repo_id')
+        .where('workspace_id', '=', opts.workspaceId)
+        .orderBy('ordinal', 'asc')
+        .executeTakeFirst();
+      if (primary) {
+        await db
+          .updateTable('workspaces')
+          .set({ repo_id: primary.repo_id })
+          .where('id', '=', opts.workspaceId)
+          .execute();
+      }
+
       return { success: true };
     },
   );

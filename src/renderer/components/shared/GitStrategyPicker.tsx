@@ -60,11 +60,27 @@ export function GitStrategyPicker({
     }
     const loadBranches = async () => {
       try {
-        const branches = (await window.athanor.invoke(
+        const result = await window.athanor.invoke(
           'repo:list-branches' as never,
           workspaceId,
-        )) as string[];
-        setSuggestions(branches);
+        );
+
+        if (Array.isArray(result)) {
+          // Single repo: flat string[]
+          setSuggestions(result as string[]);
+        } else if (result && typeof result === 'object') {
+          // Multi repo: Record<repoId, { repoName, branches[] }>
+          const multiResult = result as Record<string, { repoName: string; branches: string[] }>;
+          const allBranches = new Set<string>();
+          for (const entry of Object.values(multiResult)) {
+            for (const b of entry.branches) {
+              allBranches.add(b);
+            }
+          }
+          setSuggestions(Array.from(allBranches));
+        } else {
+          setSuggestions([]);
+        }
       } catch {
         setSuggestions([]);
       }
