@@ -3,6 +3,14 @@ export interface PreambleOptions {
   phaseId: string;
   phaseName: string;
   repos: Array<{ name: string; path: string }>;
+  loopConfig?: {
+    loopTo: number;
+    targetPhaseName: string;
+    isSelfLoop: boolean;
+    maxIterations: number;
+    condition: string;
+    currentIteration: number;
+  };
 }
 
 export function buildSystemPreamble(opts: PreambleOptions): string {
@@ -67,5 +75,27 @@ Always write your phase artifact via athanor_artifact BEFORE calling athanor_pha
 - Work within the repositories listed above. Do not modify files outside them.
 - Record decisions as you go — don't batch them at the end.
 - Keep your phase artifact focused on this phase's deliverables.
-- If you discover something that affects other phases, record it as a finding with appropriate tags so subsequent phases can find it via athanor_context.`;
+- If you discover something that affects other phases, record it as a finding with appropriate tags so subsequent phases can find it via athanor_context.${opts.loopConfig ? buildLoopSection(opts.loopConfig) : ''}`;
+}
+
+function buildLoopSection(lc: NonNullable<PreambleOptions['loopConfig']>): string {
+  const target = lc.isSelfLoop
+    ? `Phase ${lc.loopTo + 1}: ${lc.targetPhaseName} (self-loop)`
+    : `Phase ${lc.loopTo + 1}: ${lc.targetPhaseName}`;
+  const trigger = lc.condition === 'agent_signal' ? 'agent decides' : 'human approval';
+
+  return `
+
+## Loop Configuration
+
+This phase is configured to loop. After completing your work:
+- Call athanor_phase_complete with status "iterate" to trigger the next iteration.
+- Call athanor_phase_complete with status "complete" ONLY when you believe
+  no further iterations are needed or your work is fully done.
+
+- Target: ${target}
+- Current iteration: ${lc.currentIteration} of ${lc.maxIterations}
+- Trigger: ${trigger}
+
+Your summary and artifacts will be relayed to the next iteration's agent.`;
 }

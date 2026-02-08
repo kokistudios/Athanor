@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Sparkles, User, ChevronRight, ChevronDown } from 'lucide-react';
+import { Sparkles, User, ChevronRight } from 'lucide-react';
 import { ToolUseBlock } from './ToolUseBlock';
 import { secureMarkdownComponents } from '../shared/markdown-security';
 
@@ -60,24 +60,25 @@ function ThinkingBlock({ text }: { text: string }): React.ReactElement {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="py-0.5">
+    <div className={`inline-collapse py-0.5${expanded ? ' inline-collapse-expanded' : ''}`}>
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 bg-transparent border-none cursor-pointer text-left hover:bg-surface-2/50 rounded-md px-2 py-1 -ml-2 transition-colors duration-100"
+        className="inline-collapse-trigger"
       >
-        <span className="w-1.5 h-1.5 rounded-full bg-status-active shrink-0" />
-        <span className="text-[0.8125rem] text-text-tertiary italic">Thinking</span>
-        {expanded ? (
-          <ChevronDown size={11} className="text-text-tertiary" />
-        ) : (
-          <ChevronRight size={11} className="text-text-tertiary" />
-        )}
+        <span className="inline-collapse-dot inline-collapse-dot-thinking" />
+        <span className="text-text-tertiary italic">Thinking</span>
+        <ChevronRight
+          size={11}
+          className={`inline-collapse-chevron${expanded ? ' inline-collapse-chevron-open' : ''}`}
+        />
       </button>
-      {expanded && (
-        <div className="mt-1.5 ml-5 text-[0.8125rem] text-text-tertiary leading-relaxed whitespace-pre-wrap break-words max-h-[400px] overflow-auto scrollbar-thin">
-          {text}
+      <div className="inline-collapse-body">
+        <div className="inline-collapse-body-inner">
+          <div className="inline-collapse-thinking scrollbar-thin">
+            {text}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -146,13 +147,13 @@ function ToolUseInline({
   const summary = getToolSummary(name, input);
 
   return (
-    <div className="py-0.5">
+    <div className={`inline-collapse py-0.5${expanded ? ' inline-collapse-expanded' : ''}`}>
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 bg-transparent border-none cursor-pointer text-left hover:bg-surface-2/50 rounded-md px-2 py-1 -ml-2 transition-colors duration-100 max-w-full"
+        className="inline-collapse-trigger"
       >
-        <span className="w-1.5 h-1.5 rounded-full bg-status-active shrink-0" />
-        <span className="font-semibold text-text-primary text-[0.8125rem] shrink-0">
+        <span className="inline-collapse-dot inline-collapse-dot-tool" />
+        <span className="font-semibold text-text-primary shrink-0">
           {displayName}
         </span>
         {summary && (
@@ -160,17 +161,18 @@ function ToolUseInline({
             {summary}
           </span>
         )}
-        {expanded ? (
-          <ChevronDown size={11} className="text-text-tertiary shrink-0" />
-        ) : (
-          <ChevronRight size={11} className="text-text-tertiary shrink-0" />
-        )}
+        <ChevronRight
+          size={11}
+          className={`inline-collapse-chevron${expanded ? ' inline-collapse-chevron-open' : ''}`}
+        />
       </button>
-      {expanded && (
-        <pre className="mt-1 ml-5 px-3 py-2 rounded-md bg-code-bg text-[0.6875rem] text-text-secondary font-mono leading-relaxed max-h-[300px] overflow-auto scrollbar-thin whitespace-pre-wrap break-words">
-          {JSON.stringify(input, null, 2)}
-        </pre>
-      )}
+      <div className="inline-collapse-body">
+        <div className="inline-collapse-body-inner">
+          <pre className="inline-collapse-code scrollbar-thin">
+            {JSON.stringify(input, null, 2)}
+          </pre>
+        </div>
+      </div>
     </div>
   );
 }

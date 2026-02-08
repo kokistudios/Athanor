@@ -44,6 +44,7 @@
   /* Accent: The Crucible */
   --color-accent-ember: #d4692e;
   --color-accent-gold: #dab257;
+  --color-accent-violet: #a78bda;
   --color-accent-glow: rgba(212, 105, 46, 0.1);
   --color-accent-glow-strong: rgba(212, 105, 46, 0.2);
 
@@ -88,6 +89,7 @@
 
   --color-accent-ember: #c0541a;
   --color-accent-gold: #b8923a;
+  --color-accent-violet: #7c5cbf;
   --color-accent-glow: rgba(192, 84, 26, 0.08);
   --color-accent-glow-strong: rgba(192, 84, 26, 0.14);
 
@@ -1364,15 +1366,38 @@ button:disabled {
    CONFIRM DIALOG
    ============================================================ */
 
+@keyframes backdrop-fade {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(3px);
+  }
+}
+
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
 .confirm-dialog-backdrop {
   position: fixed;
   inset: 0;
   z-index: 1000;
   background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
+  animation: backdrop-fade 180ms ease-out both;
 }
 
 .light .confirm-dialog-backdrop {
@@ -1380,21 +1405,52 @@ button:disabled {
 }
 
 .confirm-dialog {
+  position: relative;
   width: 380px;
-  background: var(--color-surface-raised);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 40%),
+    var(--color-surface-raised);
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-xl);
   box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.35),
-    0 4px 12px rgba(0, 0, 0, 0.2);
+    0 24px 56px rgba(0, 0, 0, 0.4),
+    0 8px 16px rgba(0, 0, 0, 0.25),
+    0 2px 4px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
   padding: 24px;
-  animation: fade-in 150ms var(--ease-out) both;
+  animation: dialog-enter 200ms var(--ease-out) both;
+  animation-delay: 40ms;
+  overflow: hidden;
+}
+
+/* Top-edge highlight — matches card dimensionality */
+.confirm-dialog::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 20px;
+  right: 20px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.07) 30%,
+    rgba(255, 255, 255, 0.07) 70%,
+    transparent 100%
+  );
+  pointer-events: none;
 }
 
 .light .confirm-dialog {
+  background: var(--color-surface-raised);
   box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.12),
-    0 4px 12px rgba(0, 0, 0, 0.06);
+    0 24px 56px rgba(0, 0, 0, 0.14),
+    0 8px 16px rgba(0, 0, 0, 0.07),
+    0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+.light .confirm-dialog::after {
+  display: none;
 }
 
 .confirm-dialog-icon {
@@ -1408,12 +1464,14 @@ button:disabled {
   justify-content: center;
   color: var(--color-status-failed);
   margin-bottom: 16px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .confirm-dialog-title {
   font-size: 0.9375rem;
   font-weight: 600;
   color: var(--color-text-primary);
+  letter-spacing: -0.01em;
   margin-bottom: 6px;
 }
 
@@ -1437,31 +1495,42 @@ button:disabled {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 /* ============================================================
    TOAST NOTIFICATIONS
    ============================================================ */
 
-@keyframes toast-slide-in {
+@keyframes toast-enter {
   from {
     opacity: 0;
-    transform: translateX(100%);
+    transform: translateX(16px) scale(0.97);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
   }
 }
 
-@keyframes toast-slide-out {
+@keyframes toast-exit {
   from {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
   }
   to {
     opacity: 0;
-    transform: translateX(100%);
+    transform: translateX(24px) scale(0.97);
+  }
+}
+
+@keyframes toast-progress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
   }
 }
 
@@ -1478,27 +1547,407 @@ button:disabled {
 }
 
 .toast-item {
+  position: relative;
   pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  background: var(--color-surface-raised);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, transparent 50%),
+    var(--color-surface-raised);
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-lg);
   box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.25),
-    0 2px 6px rgba(0, 0, 0, 0.15);
-  animation: toast-slide-in 250ms var(--ease-out) both;
+    0 12px 32px rgba(0, 0, 0, 0.3),
+    0 4px 10px rgba(0, 0, 0, 0.18),
+    0 1px 3px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  animation: toast-enter 280ms var(--ease-out) both;
   cursor: pointer;
+  overflow: hidden;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.toast-item:hover {
+  border-color: var(--color-border-strong);
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.35),
+    0 6px 14px rgba(0, 0, 0, 0.22),
+    0 1px 3px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Auto-dismiss progress bar */
+.toast-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  transform-origin: left;
+  animation: toast-progress 6000ms linear both;
+  pointer-events: none;
+}
+
+.toast-item:hover .toast-progress {
+  animation-play-state: paused;
+}
+
+/* Variant-specific progress bar colors */
+.toast-progress-default {
+  background: var(--color-border-strong);
+}
+
+.toast-progress-approval {
+  background: var(--color-accent-ember);
+}
+
+.toast-progress-success {
+  background: var(--color-status-completed);
+}
+
+/* Variant accent tints — subtle left-border + background wash */
+.toast-variant-approval {
+  border-left: 3px solid var(--color-accent-ember);
+  background:
+    linear-gradient(90deg, rgba(212, 105, 46, 0.05) 0%, transparent 40%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, transparent 50%),
+    var(--color-surface-raised);
+}
+
+.toast-variant-success {
+  border-left: 3px solid var(--color-status-completed);
+  background:
+    linear-gradient(90deg, rgba(92, 154, 110, 0.05) 0%, transparent 40%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, transparent 50%),
+    var(--color-surface-raised);
+}
+
+.toast-variant-default {
+  border-left: 3px solid var(--color-border-strong);
+}
+
+/* Close button affordance */
+.toast-close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition:
+    color 100ms ease,
+    background 100ms ease;
+}
+
+.toast-close:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.light .toast-close:hover {
+  background: rgba(0, 0, 0, 0.05);
 }
 
 .toast-item-exit {
-  animation: toast-slide-out 200ms var(--ease-in-out) both;
+  animation: toast-exit 220ms var(--ease-in-out) both;
 }
 
 .light .toast-item {
+  background: var(--color-surface-raised);
   box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.08),
-    0 2px 6px rgba(0, 0, 0, 0.04);
+    0 12px 32px rgba(0, 0, 0, 0.1),
+    0 4px 10px rgba(0, 0, 0, 0.05),
+    0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.light .toast-item:hover {
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.12),
+    0 6px 14px rgba(0, 0, 0, 0.07),
+    0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.light .toast-variant-approval {
+  background:
+    linear-gradient(90deg, rgba(192, 84, 26, 0.04) 0%, transparent 40%),
+    var(--color-surface-raised);
+}
+
+.light .toast-variant-success {
+  background:
+    linear-gradient(90deg, rgba(92, 154, 110, 0.04) 0%, transparent 40%),
+    var(--color-surface-raised);
+}
+
+/* ============================================================
+   TOOL USE BLOCK — collapsible tool invocation display
+   ============================================================ */
+
+.tool-use-block {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-subtle);
+  overflow: hidden;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.tool-use-block:hover {
+  border-color: var(--color-border-default);
+}
+
+.tool-use-block-expanded {
+  border-color: var(--color-border-default);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.light .tool-use-block-expanded {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+/* Trigger / header row */
+.tool-use-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-family: var(--font-sans);
+  text-align: left;
+  transition:
+    background 100ms ease,
+    color 100ms ease;
+}
+
+.tool-use-trigger:hover {
+  background: var(--color-accent-glow);
+}
+
+/* Chevron with rotation */
+.tool-use-chevron {
+  color: var(--color-text-tertiary);
+  transition:
+    transform 200ms var(--ease-out),
+    color 150ms ease;
+  flex-shrink: 0;
+}
+
+.tool-use-chevron-open {
+  transform: rotate(90deg);
+  color: var(--color-accent-ember);
+}
+
+/* Tool name */
+.tool-use-name {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 0.6875rem;
+  color: var(--color-accent-ember);
+  flex-shrink: 0;
+}
+
+/* Preview text — fades out on expand */
+.tool-use-preview {
+  margin-left: 2px;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  font-size: 0.6875rem;
+  transition: opacity 150ms ease;
+}
+
+.tool-use-block-expanded .tool-use-preview {
+  opacity: 0;
+  max-width: 0;
+  margin: 0;
+  padding: 0;
+}
+
+/* Body — CSS grid height animation for smooth expand/collapse */
+.tool-use-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms var(--ease-out);
+}
+
+.tool-use-block-expanded .tool-use-body {
+  grid-template-rows: 1fr;
+}
+
+.tool-use-body-inner {
+  overflow: hidden;
+}
+
+.tool-use-content {
+  padding: 0 10px 8px;
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-code-bg);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--color-text-secondary);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* Inner spacing — applied via padding-top so the border-top
+   stays flush with the trigger when grid-row collapses to 0 */
+.tool-use-block-expanded .tool-use-content {
+  padding-top: 8px;
+}
+
+/* ============================================================
+   INLINE COLLAPSIBLE — thinking blocks & tool use summaries
+   in the agent thread.  Lighter-weight than tool-use-block,
+   sharing the same expand animation vocabulary.
+   ============================================================ */
+
+.inline-collapse {
+  border-radius: var(--radius-sm);
+  transition: background 100ms ease;
+}
+
+/* Trigger row */
+.inline-collapse-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  margin-left: -8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  text-align: left;
+  color: var(--color-text-secondary);
+  transition:
+    background 100ms ease,
+    color 100ms ease;
+  max-width: 100%;
+}
+
+.inline-collapse-trigger:hover {
+  background: var(--color-accent-glow);
+}
+
+/* Reuse the chevron rotation pattern */
+.inline-collapse-chevron {
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+  transition:
+    transform 200ms var(--ease-out),
+    color 150ms ease;
+}
+
+.inline-collapse-chevron-open {
+  transform: rotate(90deg);
+  color: var(--color-accent-ember);
+}
+
+/* Status dot (the small colored circle) */
+.inline-collapse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.inline-collapse-dot-thinking {
+  background: var(--color-status-active);
+}
+
+.inline-collapse-dot-tool {
+  background: var(--color-status-active);
+}
+
+/* Body — CSS grid height animation */
+.inline-collapse-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms var(--ease-out);
+}
+
+.inline-collapse-expanded .inline-collapse-body {
+  grid-template-rows: 1fr;
+}
+
+.inline-collapse-body-inner {
+  overflow: hidden;
+}
+
+/* Thinking content */
+.inline-collapse-thinking {
+  margin-top: 6px;
+  margin-left: 20px;
+  font-size: 0.8125rem;
+  color: var(--color-text-tertiary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* Tool input content */
+.inline-collapse-code {
+  margin-top: 4px;
+  margin-left: 20px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--color-code-bg);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--color-text-secondary);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* ============================================================
+   AGENT LOOP INDICATORS
+   ============================================================ */
+
+.agent-loop-iter {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  color: var(--color-accent-violet);
+  background: color-mix(in srgb, var(--color-accent-violet) 12%, transparent);
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.agent-loop-connector {
+  position: absolute;
+  left: 4px;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: color-mix(in srgb, var(--color-accent-violet) 30%, transparent);
+  border-radius: 1px;
 }

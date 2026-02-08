@@ -523,12 +523,59 @@ export class WorkflowEngine extends EventEmitter {
       }
     }
 
+    // Compute loop context for system prompt and agent row
+    let loopConfig: Parameters<typeof buildSystemPreamble>[0]['loopConfig'];
+    let loopIteration: number | undefined;
+
+    const loopTo = phaseConfig.loop_to;
+    if (loopTo !== undefined && loopTo !== null) {
+      const targetPhase = await this.db
+        .selectFrom('workflow_phases')
+        .select('name')
+        .where('workflow_id', '=', session.workflow_id)
+        .where('ordinal', '=', loopTo)
+        .executeTakeFirst();
+
+      if (targetPhase) {
+        const isSelfLoop = loopTo === currentPhase.ordinal;
+        const maxIterations = phaseConfig.max_iterations || 20;
+        const condition = phaseConfig.loop_condition || 'agent_signal';
+
+        let currentIterationCount = 0;
+        if (session.loop_state) {
+          try {
+            const ls = JSON.parse(session.loop_state) as {
+              iterations?: number;
+              loop_origin_ordinal?: number;
+            };
+            if (ls.loop_origin_ordinal === currentPhase.ordinal) {
+              currentIterationCount = ls.iterations || 0;
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        loopIteration = currentIterationCount + 1;
+
+        loopConfig = {
+          loopTo,
+          targetPhaseName: targetPhase.name,
+          isSelfLoop,
+          maxIterations,
+          condition,
+          currentIteration: loopIteration,
+        };
+      }
+    }
+
     // Build shared system prompt
     const systemPrompt = buildSystemPreamble({
       sessionId,
       phaseId: phase.id,
       phaseName: phase.name,
       repos: promptRepos,
+      loopConfig,
     });
 
     await this.agentManager.spawnAgent({
@@ -545,6 +592,7 @@ export class WorkflowEngine extends EventEmitter {
       agents,
       permissionMode,
       agentType,
+      loopIteration,
     });
   }
 

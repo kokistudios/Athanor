@@ -24,6 +24,7 @@ export function registerAgentHandlers(
         'agents.phase_id',
         'agents.name',
         'agents.status',
+        'agents.loop_iteration',
         'agents.created_at',
         'sessions.description as session_description',
         'sessions.status as session_status',

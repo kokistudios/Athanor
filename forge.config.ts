@@ -16,7 +16,7 @@ const config: ForgeConfig = {
     asar: true,
     name: 'Athanor',
     icon: './icon_logo',
-    extraResource: ['./icon_logo.png'],
+    extraResource: ['./icon_logo.png', './dist/mcp'],
   },
   rebuildConfig: {},
   makers: [

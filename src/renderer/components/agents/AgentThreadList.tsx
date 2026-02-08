@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AgentThread } from './AgentThread';
-import { ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen, UsersRound } from 'lucide-react';
+import { ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen, RefreshCw, UsersRound } from 'lucide-react';
 
 interface Agent {
   id: string;
@@ -8,6 +8,7 @@ interface Agent {
   phase_id: string;
   name: string;
   status: string;
+  loop_iteration: number | null;
   created_at: string;
   session_description: string | null;
   session_status: string;
@@ -243,8 +244,13 @@ export function AgentThreadList({
                     {/* Agent list within session */}
                     {!isCollapsed && (
                       <div className="flex flex-col gap-0.5" style={{ paddingLeft: 8 }}>
-                        {group.agents.map((agent) => {
+                        {group.agents.map((agent, idx) => {
                           const isSelected = selectedAgentId === agent.id;
+                          const prevAgent = idx > 0 ? group.agents[idx - 1] : null;
+                          const showConnector =
+                            agent.loop_iteration !== null &&
+                            prevAgent?.loop_iteration !== null &&
+                            prevAgent?.phase_id === agent.phase_id;
                           return (
                             <button
                               key={agent.id}
@@ -281,6 +287,7 @@ export function AgentThreadList({
                                 }
                               }}
                             >
+                              {showConnector && <span className="agent-loop-connector" />}
                               {isSelected && (
                                 <span
                                   style={{
@@ -295,8 +302,22 @@ export function AgentThreadList({
                                   }}
                                 />
                               )}
-                              <span style={{ fontSize: '0.8125rem', fontWeight: 500 }}>
+                              <span
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  fontSize: '0.8125rem',
+                                  fontWeight: 500,
+                                }}
+                              >
                                 {agent.name}
+                                {agent.loop_iteration !== null && (
+                                  <span className="agent-loop-iter">
+                                    <RefreshCw size={9} />
+                                    iter {agent.loop_iteration}
+                                  </span>
+                                )}
                               </span>
                               <span
                                 style={{

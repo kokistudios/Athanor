@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 
 export interface ToastData {
@@ -13,45 +13,48 @@ interface ToastItemProps {
   onDismiss: (id: string) => void;
 }
 
+const TOAST_DURATION = 6000;
+const EXIT_DURATION = 220;
+
 function ToastItem({ toast, onDismiss }: ToastItemProps): React.ReactElement {
   const [exiting, setExiting] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(null);
+  const variant = toast.variant || 'default';
 
   useEffect(() => {
-    const timer = setTimeout(() => {
+    timerRef.current = setTimeout(() => {
       setExiting(true);
-      setTimeout(() => onDismiss(toast.id), 200);
-    }, 6000);
-    return () => clearTimeout(timer);
+      setTimeout(() => onDismiss(toast.id), EXIT_DURATION);
+    }, TOAST_DURATION);
+    return () => clearTimeout(timerRef.current);
   }, [toast.id, onDismiss]);
-
-  const borderColor =
-    toast.variant === 'approval'
-      ? 'var(--color-accent-ember)'
-      : toast.variant === 'success'
-        ? 'var(--color-accent-green)'
-        : 'var(--color-border-strong)';
 
   return (
     <div
-      className={`toast-item ${exiting ? 'toast-item-exit' : ''}`}
-      style={{ borderLeft: `3px solid ${borderColor}` }}
+      className={`toast-item toast-variant-${variant} ${exiting ? 'toast-item-exit' : ''}`}
       onClick={() => {
         toast.onClick?.();
         onDismiss(toast.id);
       }}
       role={toast.onClick ? 'button' : undefined}
     >
-      <div className="flex-1 text-[0.8125rem] text-text-primary leading-snug">{toast.message}</div>
+      <div className="flex-1 text-[0.8125rem] text-text-primary leading-snug">
+        {toast.message}
+      </div>
       <button
         onClick={(e) => {
           e.stopPropagation();
           setExiting(true);
-          setTimeout(() => onDismiss(toast.id), 200);
+          setTimeout(() => onDismiss(toast.id), EXIT_DURATION);
         }}
-        className="flex-shrink-0 text-text-tertiary hover:text-text-primary transition-colors"
+        className="toast-close"
+        aria-label="Dismiss notification"
       >
         <X size={14} />
       </button>
+
+      {/* Auto-dismiss progress indicator */}
+      <div className={`toast-progress toast-progress-${variant}`} />
     </div>
   );
 }

@@ -35,6 +35,7 @@ export interface SpawnAgentOptions {
   agentType?: CliAgentType;
   claudeSessionId?: string;
   mcpConfigPath?: string;
+  loopIteration?: number;
 }
 
 export interface AgentProcess {
@@ -85,6 +86,7 @@ export class AgentManager extends EventEmitter {
         branch: opts.branch || null,
         claude_session_id: opts.claudeSessionId || null,
         worktree_manifest: opts.worktreeManifest || null,
+        loop_iteration: opts.loopIteration || null,
         status: 'spawning',
       })
       .execute();
@@ -219,11 +221,26 @@ export class AgentManager extends EventEmitter {
     });
   }
 
+  private getMcpServerPath(): string {
+    // In packaged builds, dist/mcp is an extraResource alongside the app.
+    // process.resourcesPath points to the Resources dir inside the .app bundle.
+    // In dev, process.cwd() is the project root.
+    try {
+      const { app } = require('electron');
+      if (app.isPackaged) {
+        return path.join(process.resourcesPath, 'mcp', 'mcp', 'server.js');
+      }
+    } catch {
+      // Not in Electron context (e.g. tests) — fall through to dev path
+    }
+    return path.join(process.cwd(), 'dist', 'mcp', 'mcp', 'server.js');
+  }
+
   private buildAthanorMcpServer(agentId: string, opts: SpawnAgentOptions): McpServerDefinition {
     return {
       name: 'athanor',
       command: 'node',
-      args: [path.join(process.cwd(), 'dist', 'mcp', 'mcp', 'server.js')],
+      args: [this.getMcpServerPath()],
       env: {
         PATH: process.env.PATH || '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin',
         HOME: process.env.HOME || '',

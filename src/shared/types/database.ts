@@ -72,6 +72,7 @@ export interface AgentTable {
   phase_summary: string | null;
   completion_signal: string | null;
   status: Generated<string>;
+  loop_iteration: number | null;
   spawned_by: string | null;
   created_at: Generated<string>;
   completed_at: string | null;
