@@ -13,6 +13,8 @@ const agentId = process.env.ATHANOR_AGENT_ID;
 const sessionId = process.env.ATHANOR_SESSION_ID;
 const phaseId = process.env.ATHANOR_PHASE_ID;
 const dataDir = process.env.ATHANOR_DATA_DIR;
+const workspaceId = process.env.ATHANOR_WORKSPACE_ID || null;
+const decisionsEnabled = process.env.ATHANOR_DECISIONS_ENABLED !== 'false';
 
 if (!dbPath || !agentId || !sessionId || !phaseId || !dataDir) {
   console.error(
@@ -39,7 +41,7 @@ server.tool(
   'Surface relevant decisions and artifacts before work begins',
   contextSchema.shape,
   async (params) => {
-    const result = await athanorContext(db, sessionId, params);
+    const result = await athanorContext(db, sessionId, workspaceId, params);
     return { content: [{ type: 'text', text: result }] };
   },
 );
@@ -49,7 +51,10 @@ server.tool(
   'Record a decision or finding immediately',
   recordSchema.shape,
   async (params) => {
-    const result = await athanorRecord(db, sessionId, agentId, params);
+    if (!decisionsEnabled) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'Decisions are disabled for this phase. Use athanor_artifact to record outputs instead.' }) }] };
+    }
+    const result = await athanorRecord(db, sessionId, agentId, workspaceId, params);
     return { content: [{ type: 'text', text: result }] };
   },
 );
@@ -59,7 +64,10 @@ server.tool(
   'Propose a decision for human confirmation',
   decideSchema.shape,
   async (params) => {
-    const result = await athanorDecide(db, sessionId, agentId, params);
+    if (!decisionsEnabled) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'Decisions are disabled for this phase. Use athanor_artifact to record outputs instead.' }) }] };
+    }
+    const result = await athanorDecide(db, sessionId, agentId, workspaceId, params);
     return { content: [{ type: 'text', text: result }] };
   },
 );

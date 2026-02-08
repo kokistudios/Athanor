@@ -248,17 +248,23 @@ export class WorkflowEngine extends EventEmitter {
 
     const firstPhase = phases[0];
 
-    // Check for 'before' gate
-    if (firstPhase.approval === 'before') {
-      await this.approvalRouter.createApproval({
-        sessionId,
-        type: 'phase_gate',
-        summary: `Approve starting phase "${firstPhase.name}"?`,
-        payload: { phaseId: firstPhase.id, phaseName: firstPhase.name, direction: 'before' },
-      });
-      await this.setSessionStatus(sessionId, 'waiting_approval');
-    } else {
-      await this.launchPhaseAgent(sessionId, firstPhase);
+    try {
+      // Check for 'before' gate
+      if (firstPhase.approval === 'before') {
+        await this.approvalRouter.createApproval({
+          sessionId,
+          type: 'phase_gate',
+          summary: `Approve starting phase "${firstPhase.name}"?`,
+          payload: { phaseId: firstPhase.id, phaseName: firstPhase.name, direction: 'before' },
+        });
+        await this.setSessionStatus(sessionId, 'waiting_approval');
+      } else {
+        await this.launchPhaseAgent(sessionId, firstPhase);
+      }
+    } catch (err) {
+      // Roll back: delete the session so we don't leave orphaned rows
+      await this.db.deleteFrom('sessions').where('id', '=', sessionId).execute();
+      throw err;
     }
 
     return sessionId;
@@ -439,8 +445,13 @@ export class WorkflowEngine extends EventEmitter {
       phaseConfig.permission_mode || 'bypassPermissions';
     const agentType = phaseConfig.agent_type || 'claude';
 
-    // Resolve git strategy: phase config > session default > worktree fallback
-    const gitStrategy = this.resolveGitStrategy(phaseConfig, session.git_strategy);
+    // Resolve git strategy: session override > workflow default > worktree fallback
+    const workflow = await this.db
+      .selectFrom('workflows')
+      .select('git_strategy')
+      .where('id', '=', session.workflow_id)
+      .executeTakeFirstOrThrow();
+    const gitStrategy = this.resolveGitStrategy(session.git_strategy, workflow.git_strategy);
     const taskName = `${phase.name}-${sessionId.slice(0, 8)}`;
     const isMultiRepo = repos.length > 1;
 
@@ -578,6 +589,8 @@ export class WorkflowEngine extends EventEmitter {
       loopConfig,
     });
 
+    const decisionsEnabled = phaseConfig.decisions !== false;
+
     await this.agentManager.spawnAgent({
       sessionId,
       phaseId: phase.id,
@@ -593,19 +606,29 @@ export class WorkflowEngine extends EventEmitter {
       permissionMode,
       agentType,
       loopIteration,
+      workspaceId: session.workspace_id,
+      decisionsEnabled,
     });
   }
 
   private resolveGitStrategy(
-    phaseConfig: WorkflowPhaseConfig,
     sessionGitStrategy: string | null,
+    workflowGitStrategy: string | null,
   ): GitStrategy {
-    if (phaseConfig.git_strategy) return phaseConfig.git_strategy;
+    // Session-level override takes priority (user explicitly chose at launch)
     if (sessionGitStrategy) {
       try {
         return JSON.parse(sessionGitStrategy) as GitStrategy;
       } catch {
-        // ignore malformed session git strategy
+        // ignore malformed
+      }
+    }
+    // Workflow default
+    if (workflowGitStrategy) {
+      try {
+        return JSON.parse(workflowGitStrategy) as GitStrategy;
+      } catch {
+        // ignore malformed
       }
     }
     return { mode: 'worktree' };

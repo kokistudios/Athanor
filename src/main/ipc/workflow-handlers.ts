@@ -23,7 +23,7 @@ const workflowPhaseConfigSchema = z
   .object({
     permission_mode: permissionModeSchema.optional(),
     agent_type: cliAgentTypeSchema.optional(),
-    git_strategy: gitStrategySchema.optional(),
+    decisions: z.boolean().optional(),
     relay: z.enum(RELAY_MODES).optional(),
     loop_to: z.number().int().min(0).optional(),
     max_iterations: z.number().int().min(1).max(100).optional(),
@@ -60,6 +60,7 @@ const workflowCreateArgsSchema = z.tuple([
       userId: uuidSchema,
       name: z.string().min(1).max(256),
       description: z.string().max(4000).optional(),
+      gitStrategy: gitStrategySchema.optional(),
       phases: z.array(workflowPhaseCreateSchema).max(64).optional(),
     })
     .strict(),
@@ -71,6 +72,7 @@ const workflowUpdateArgsSchema = z.tuple([
       id: uuidSchema,
       name: z.string().max(256).optional(),
       description: z.string().max(4000).optional(),
+      gitStrategy: gitStrategySchema.optional().nullable(),
       phases: z.array(workflowPhaseUpdateSchema).max(64).optional(),
     })
     .strict(),
@@ -134,6 +136,7 @@ export function registerWorkflowHandlers(
           user_id: opts.userId,
           name: opts.name,
           description: opts.description || null,
+          git_strategy: opts.gitStrategy ? JSON.stringify(opts.gitStrategy) : null,
         })
         .execute();
 
@@ -173,6 +176,9 @@ export function registerWorkflowHandlers(
       const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (opts.name !== undefined) updates.name = opts.name;
       if (opts.description !== undefined) updates.description = opts.description;
+      if (opts.gitStrategy !== undefined) {
+        updates.git_strategy = opts.gitStrategy ? JSON.stringify(opts.gitStrategy) : null;
+      }
 
       await db.updateTable('workflows').set(updates).where('id', '=', opts.id).execute();
 

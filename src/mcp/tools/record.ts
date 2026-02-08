@@ -19,6 +19,7 @@ export async function athanorRecord(
   db: Kysely<Database>,
   sessionId: string,
   agentId: string,
+  workspaceId: string | null,
   params: z.infer<typeof recordSchema>,
 ): Promise<string> {
   const id = crypto.randomUUID();
@@ -29,6 +30,7 @@ export async function athanorRecord(
       id,
       session_id: sessionId,
       agent_id: agentId,
+      workspace_id: workspaceId,
       question: params.question,
       choice: params.choice,
       rationale: params.rationale,

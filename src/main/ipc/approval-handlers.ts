@@ -23,6 +23,7 @@ const decisionListArgsSchema = z.tuple([
     .object({
       sessionId: uuidSchema.optional(),
       agentId: uuidSchema.optional(),
+      workspaceId: uuidSchema.optional(),
       tags: z.array(z.string().max(256)).optional(),
       status: z.string().max(64).optional(),
     })
@@ -38,6 +39,7 @@ const decisionListGroupedArgsSchema = z.tuple([
       search: z.string().max(1000).optional(),
       filterType: z.string().max(64).optional(),
       filterStatus: z.string().max(64).optional(),
+      workspaceId: uuidSchema.optional(),
     })
     .strict()
     .optional(),
@@ -145,6 +147,9 @@ export function registerApprovalHandlers(
     async (_event, filters) => {
       let query = db.selectFrom('decisions').selectAll().orderBy('created_at', 'desc');
 
+      if (filters?.workspaceId) {
+        query = query.where('workspace_id', '=', filters.workspaceId);
+      }
       if (filters?.sessionId) {
         query = query.where('session_id', '=', filters.sessionId);
       }
@@ -184,9 +189,12 @@ export function registerApprovalHandlers(
         ? parseSearchString(opts.search)
         : { tags: [] as string[], keywords: [] as string[] };
 
-      // Helper: apply search/type/status filters to a decisions query
+      // Helper: apply search/type/status/workspace filters to a decisions query
       function applyFilters<T>(query: T): T {
         let q = query as ReturnType<typeof db.selectFrom<'decisions'>>;
+        if (opts?.workspaceId) {
+          q = q.where('workspace_id', '=', opts.workspaceId) as typeof q;
+        }
         if (opts?.filterType) {
           q = q.where('type', '=', opts.filterType) as typeof q;
         }

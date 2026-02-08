@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { TransparentMarkdownEditor } from '../shared/TransparentMarkdownEditor';
 import { GitStrategyPicker } from '../shared/GitStrategyPicker';
-import { Plus, Rocket, X, GitBranch } from 'lucide-react';
+import { ErrorDialog } from '../shared/ErrorDialog';
+import { Plus, Rocket, X, GitBranch, Settings2 } from 'lucide-react';
 import type { GitStrategy } from '../../../shared/types/workflow-phase';
 
 interface Repo {
@@ -20,6 +21,28 @@ interface Workflow {
   id: string;
   name: string;
   description: string | null;
+  git_strategy: string | null;
+}
+
+function describeStrategy(strategy: GitStrategy | null): string {
+  if (!strategy) return 'Worktree (isolated)';
+  switch (strategy.mode) {
+    case 'worktree':
+      return 'Worktree (isolated)';
+    case 'main':
+      return 'Main (in-place)';
+    case 'branch':
+      return `Branch: ${strategy.branch} (${strategy.isolation === 'worktree' ? 'worktree' : 'in-place'})`;
+  }
+}
+
+function parseStrategy(raw: string | null): GitStrategy | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as GitStrategy;
+  } catch {
+    return null;
+  }
 }
 
 interface LaunchSessionProps {
@@ -33,7 +56,8 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
   const [selectedWorkflow, setSelectedWorkflow] = useState('');
   const [description, setDescription] = useState('');
   const [context, setContext] = useState('');
-  const [gitStrategy, setGitStrategy] = useState<GitStrategy | null>(null);
+  const [gitStrategyOverride, setGitStrategyOverride] = useState<GitStrategy | null>(null);
+  const [overrideEnabled, setOverrideEnabled] = useState(false);
   const [workspaceRepos, setWorkspaceRepos] = useState<Repo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
@@ -75,6 +99,12 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
     void loadRepos();
   }, [selectedWorkspace]);
 
+  // Derive the workflow's default git strategy
+  const selectedWorkflowObj = workflows.find((wf) => wf.id === selectedWorkflow);
+  const workflowDefault = selectedWorkflowObj
+    ? parseStrategy(selectedWorkflowObj.git_strategy)
+    : null;
+
   const handleLaunch = async () => {
     if (!selectedWorkspace || !selectedWorkflow) return;
     setLaunching(true);
@@ -87,11 +117,12 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
         workflowId: selectedWorkflow,
         description: description || undefined,
         context: context || undefined,
-        gitStrategy: gitStrategy || undefined,
+        gitStrategy: overrideEnabled && gitStrategyOverride ? gitStrategyOverride : undefined,
       });
       setDescription('');
       setContext('');
-      setGitStrategy(null);
+      setGitStrategyOverride(null);
+      setOverrideEnabled(false);
       setExpanded(false);
       onLaunched();
     } catch (err) {
@@ -176,7 +207,11 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
       <div className="mb-3">
         <select
           value={selectedWorkflow}
-          onChange={(e) => setSelectedWorkflow(e.target.value)}
+          onChange={(e) => {
+            setSelectedWorkflow(e.target.value);
+            setOverrideEnabled(false);
+            setGitStrategyOverride(null);
+          }}
           className="input-base w-full"
         >
           <option value="">Select Workflow</option>
@@ -212,20 +247,55 @@ export function LaunchSession({ onLaunched }: LaunchSessionProps): React.ReactEl
         }}
       />
 
-      <div className="mb-3">
-        <div className="text-[0.6875rem] text-text-tertiary mb-1.5">Git Strategy</div>
-        <GitStrategyPicker
-          value={gitStrategy}
-          onChange={setGitStrategy}
-          workspaceId={selectedWorkspace || undefined}
-        />
-      </div>
-
-      {error && (
-        <div className="text-[0.75rem] text-status-failed mb-3 p-2.5 rounded-md bg-surface-2 border border-border-default">
-          {error}
+      {selectedWorkflow && (
+        <div className="mb-3">
+          <div className="text-[0.6875rem] text-text-tertiary mb-1.5">Git Strategy</div>
+          {!overrideEnabled ? (
+            <div className="flex items-center gap-2">
+              <span className="text-[0.8125rem] text-text-secondary">
+                {describeStrategy(workflowDefault)}
+              </span>
+              <span className="text-[0.6875rem] text-text-tertiary">(workflow default)</span>
+              <button
+                type="button"
+                onClick={() => setOverrideEnabled(true)}
+                className="btn-ghost flex items-center gap-1 text-[0.6875rem] !px-1.5 !py-0.5"
+              >
+                <Settings2 size={11} />
+                Override
+              </button>
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-[0.6875rem] font-medium text-accent-ember">Override active</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOverrideEnabled(false);
+                    setGitStrategyOverride(null);
+                  }}
+                  className="btn-ghost text-[0.6875rem] !px-1.5 !py-0.5"
+                >
+                  Reset
+                </button>
+              </div>
+              <GitStrategyPicker
+                value={gitStrategyOverride}
+                onChange={setGitStrategyOverride}
+                workspaceId={selectedWorkspace || undefined}
+              />
+            </div>
+          )}
         </div>
       )}
+
+      <ErrorDialog
+        open={!!error}
+        title="Launch Failed"
+        message={error || ''}
+        onDismiss={() => setError(null)}
+      />
 
       <div className="flex gap-2">
         <button

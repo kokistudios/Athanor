@@ -36,6 +36,8 @@ export interface SpawnAgentOptions {
   claudeSessionId?: string;
   mcpConfigPath?: string;
   loopIteration?: number;
+  workspaceId?: string;
+  decisionsEnabled?: boolean;
 }
 
 export interface AgentProcess {
@@ -250,6 +252,8 @@ export class AgentManager extends EventEmitter {
         ATHANOR_SESSION_ID: opts.sessionId,
         ATHANOR_PHASE_ID: opts.phaseId,
         ATHANOR_DATA_DIR: this.config.storage.local.path,
+        ...(opts.workspaceId ? { ATHANOR_WORKSPACE_ID: opts.workspaceId } : {}),
+        ...(opts.decisionsEnabled === false ? { ATHANOR_DECISIONS_ENABLED: 'false' } : {}),
       },
     };
   }

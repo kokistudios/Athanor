@@ -6,13 +6,12 @@ interface GitStrategyPickerProps {
   value: GitStrategy | null;
   onChange: (v: GitStrategy | null) => void;
   workspaceId?: string;
-  allowInherit?: boolean;
 }
 
-type PickerMode = 'inherit' | 'worktree' | 'main' | 'branch';
+type PickerMode = 'worktree' | 'main' | 'branch';
 
-function strategyToMode(strategy: GitStrategy | null, allowInherit: boolean): PickerMode {
-  if (!strategy) return allowInherit ? 'inherit' : 'worktree';
+function strategyToMode(strategy: GitStrategy | null): PickerMode {
+  if (!strategy) return 'worktree';
   return strategy.mode;
 }
 
@@ -21,8 +20,6 @@ function modeToStrategy(
   branchState: { branch: string; isolation: 'worktree' | 'in_place'; create: boolean },
 ): GitStrategy | null {
   switch (mode) {
-    case 'inherit':
-      return null;
     case 'worktree':
       return { mode: 'worktree' };
     case 'main':
@@ -41,9 +38,8 @@ export function GitStrategyPicker({
   value,
   onChange,
   workspaceId,
-  allowInherit = false,
 }: GitStrategyPickerProps): React.ReactElement {
-  const [mode, setMode] = useState<PickerMode>(() => strategyToMode(value, allowInherit));
+  const [mode, setMode] = useState<PickerMode>(() => strategyToMode(value));
   const [branch, setBranch] = useState(value?.mode === 'branch' ? value.branch : '');
   const [isolation, setIsolation] = useState<'worktree' | 'in_place'>(
     value?.mode === 'branch' ? value.isolation : 'worktree',
@@ -51,6 +47,17 @@ export function GitStrategyPicker({
   const [create, setCreate] = useState(value?.mode === 'branch' ? value.create : true);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Sync internal state when value prop changes (e.g. after async load)
+  useEffect(() => {
+    const newMode = strategyToMode(value);
+    setMode(newMode);
+    if (value?.mode === 'branch') {
+      setBranch(value.branch);
+      setIsolation(value.isolation);
+      setCreate(value.create);
+    }
+  }, [value?.mode, value?.mode === 'branch' ? value.branch : '']);
 
   // Load branch suggestions when workspace changes
   useEffect(() => {
@@ -127,7 +134,6 @@ export function GitStrategyPicker({
           onChange={(e) => handleModeChange(e.target.value as PickerMode)}
           className="phase-select"
         >
-          {allowInherit && <option value="inherit">Inherit</option>}
           <option value="worktree">Worktree (isolated)</option>
           <option value="main">Main (in-place)</option>
           <option value="branch">Named branch</option>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { PhaseEditor, type PhaseData } from './PhaseEditor';
 import { ArrowLeft, Plus, Save, Workflow, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
+import { GitStrategyPicker } from '../shared/GitStrategyPicker';
 import type { GitStrategy, WorkflowPhaseConfig } from '../../../shared/types/workflow-phase';
 import { CLI_AGENT_TYPES, GIT_STRATEGY_MODES, LOOP_CONDITIONS, RELAY_MODES } from '../../../shared/types/domain';
 import type { LoopCondition, RelayMode } from '../../../shared/types/domain';
@@ -11,11 +12,11 @@ const GIT_STRATEGY_MODE_SET = new Set<string>(GIT_STRATEGY_MODES);
 const RELAY_MODE_SET = new Set<string>(RELAY_MODES);
 const LOOP_CONDITION_SET = new Set<string>(LOOP_CONDITIONS);
 
-function parsePhaseConfig(config: string | null): Required<Pick<PhaseData, 'permission_mode' | 'agent_type' | 'git_strategy' | 'relay' | 'loop_to' | 'max_iterations' | 'loop_condition'>> {
+function parsePhaseConfig(config: string | null): Required<Pick<PhaseData, 'permission_mode' | 'agent_type' | 'decisions' | 'relay' | 'loop_to' | 'max_iterations' | 'loop_condition'>> {
   const defaults = {
     permission_mode: 'default' as const,
     agent_type: 'claude' as const,
-    git_strategy: null as GitStrategy | null,
+    decisions: true,
     relay: 'summary' as RelayMode,
     loop_to: null as number | null,
     max_iterations: null as number | null,
@@ -30,10 +31,7 @@ function parsePhaseConfig(config: string | null): Required<Pick<PhaseData, 'perm
       typeof parsed.agent_type === 'string' && CLI_AGENT_TYPE_SET.has(parsed.agent_type)
         ? parsed.agent_type
         : 'claude';
-    let git_strategy: GitStrategy | null = null;
-    if (parsed.git_strategy && GIT_STRATEGY_MODE_SET.has(parsed.git_strategy.mode)) {
-      git_strategy = parsed.git_strategy;
-    }
+    const decisions = parsed.decisions !== false;
     const relay: RelayMode =
       typeof parsed.relay === 'string' && RELAY_MODE_SET.has(parsed.relay)
         ? (parsed.relay as RelayMode)
@@ -44,10 +42,21 @@ function parsePhaseConfig(config: string | null): Required<Pick<PhaseData, 'perm
       typeof parsed.loop_condition === 'string' && LOOP_CONDITION_SET.has(parsed.loop_condition)
         ? (parsed.loop_condition as LoopCondition)
         : null;
-    return { permission_mode, agent_type, git_strategy, relay, loop_to, max_iterations, loop_condition };
+    return { permission_mode, agent_type, decisions, relay, loop_to, max_iterations, loop_condition };
   } catch {
     return defaults;
   }
+}
+
+function parseGitStrategy(raw: string | null): GitStrategy | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as GitStrategy;
+    if (parsed && GIT_STRATEGY_MODE_SET.has(parsed.mode)) return parsed;
+  } catch {
+    // ignore
+  }
+  return null;
 }
 
 interface WorkflowEditorProps {
@@ -65,6 +74,7 @@ export function WorkflowEditor({
 }: WorkflowEditorProps): React.ReactElement {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [gitStrategy, setGitStrategy] = useState<GitStrategy | null>(null);
   const [phases, setPhases] = useState<PhaseData[]>([]);
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -77,6 +87,7 @@ export function WorkflowEditor({
       const result = (await window.athanor.invoke('workflow:get' as never, workflowId)) as {
         name: string;
         description: string | null;
+        git_strategy: string | null;
         phases: Array<{
           id: string;
           name: string;
@@ -92,6 +103,7 @@ export function WorkflowEditor({
 
       setName(result.name);
       setDescription(result.description || '');
+      setGitStrategy(parseGitStrategy(result.git_strategy));
       setPhases(
         result.phases.map((p) => {
           const phaseConfig = parsePhaseConfig(p.config);
@@ -104,7 +116,7 @@ export function WorkflowEditor({
             approval: p.approval,
             permission_mode: phaseConfig.permission_mode,
             agent_type: phaseConfig.agent_type,
-            git_strategy: phaseConfig.git_strategy,
+            decisions: phaseConfig.decisions,
             relay: phaseConfig.relay,
             loop_to: phaseConfig.loop_to,
             max_iterations: phaseConfig.max_iterations,
@@ -128,7 +140,7 @@ export function WorkflowEditor({
         approval: 'none',
         permission_mode: 'default',
         agent_type: 'claude',
-        git_strategy: null,
+        decisions: true,
         relay: 'summary',
         loop_to: null,
         max_iterations: null,
@@ -152,7 +164,7 @@ export function WorkflowEditor({
         config: {
           permission_mode: p.permission_mode,
           agent_type: p.agent_type,
-          ...(p.git_strategy ? { git_strategy: p.git_strategy } : {}),
+          ...(!p.decisions ? { decisions: false } : {}),
           ...(p.relay !== 'summary' ? { relay: p.relay } : {}),
           ...(p.loop_to !== null ? { loop_to: p.loop_to } : {}),
           ...(p.max_iterations !== null ? { max_iterations: p.max_iterations } : {}),
@@ -165,6 +177,7 @@ export function WorkflowEditor({
           id: workflowId,
           name,
           description: description || undefined,
+          gitStrategy: gitStrategy || undefined,
           phases: phasePayloads,
         });
       } else {
@@ -173,6 +186,7 @@ export function WorkflowEditor({
           userId: user.id,
           name,
           description: description || undefined,
+          gitStrategy: gitStrategy || undefined,
           phases: phasePayloads,
         });
       }
@@ -246,6 +260,16 @@ export function WorkflowEditor({
               onChange={(e) => { setDescription(e.target.value); setDirty(true); }}
               placeholder="Description"
               className="input-base w-full"
+            />
+          </div>
+
+          <div className="mb-6">
+            <label className="text-[0.6875rem] font-semibold tracking-[0.04em] uppercase text-text-tertiary block mb-2">
+              Git Strategy
+            </label>
+            <GitStrategyPicker
+              value={gitStrategy}
+              onChange={(v) => { setGitStrategy(v); setDirty(true); }}
             />
           </div>
 

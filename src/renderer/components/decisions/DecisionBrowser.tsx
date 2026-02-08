@@ -46,6 +46,11 @@ function parseJsonArray(raw: string | null): string[] {
   }
 }
 
+interface WorkspaceOption {
+  id: string;
+  name: string;
+}
+
 export function DecisionBrowser(): React.ReactElement {
   const [sessionGroups, setSessionGroups] = useState<SessionGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,7 +62,21 @@ export function DecisionBrowser(): React.ReactElement {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [workspaceId, setWorkspaceId] = useState('');
+  const [workspaces, setWorkspaces] = useState<WorkspaceOption[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    const loadWorkspaces = async () => {
+      try {
+        const ws = (await window.athanor.invoke('db:list-workspaces' as never)) as WorkspaceOption[];
+        setWorkspaces(ws);
+      } catch {
+        // ignore
+      }
+    };
+    void loadWorkspaces();
+  }, []);
 
   const loadGroups = useCallback(
     async (offset: number, append: boolean) => {
@@ -68,6 +87,7 @@ export function DecisionBrowser(): React.ReactElement {
         if (search) opts.search = search;
         if (filterType) opts.filterType = filterType;
         if (filterStatus) opts.filterStatus = filterStatus;
+        if (workspaceId) opts.workspaceId = workspaceId;
 
         const result = (await window.athanor.invoke(
           'decision:list-grouped' as never,
@@ -87,7 +107,7 @@ export function DecisionBrowser(): React.ReactElement {
         setLoadingMore(false);
       }
     },
-    [search, filterType, filterStatus],
+    [search, filterType, filterStatus, workspaceId],
   );
 
   useEffect(() => {
@@ -190,6 +210,20 @@ export function DecisionBrowser(): React.ReactElement {
             <option value="active">Active</option>
             <option value="invalidated">Invalidated</option>
           </select>
+          {workspaces.length > 1 && (
+            <select
+              value={workspaceId}
+              onChange={(e) => setWorkspaceId(e.target.value)}
+              className="input-base text-[0.75rem] py-1 px-2"
+            >
+              <option value="">All workspaces</option>
+              {workspaces.map((ws) => (
+                <option key={ws.id} value={ws.id}>
+                  {ws.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 

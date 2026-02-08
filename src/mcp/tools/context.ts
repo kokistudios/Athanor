@@ -12,17 +12,22 @@ export const contextSchema = z.object({
 export async function athanorContext(
   db: Kysely<Database>,
   sessionId: string,
+  workspaceId: string | null,
   params: z.infer<typeof contextSchema>,
 ): Promise<string> {
   const limit = params.limit || 15;
 
-  // Get decisions for this session and related sessions
+  // Get active decisions scoped to this workspace
   let query = db
     .selectFrom('decisions')
     .selectAll()
     .where('status', '=', 'active')
     .orderBy('created_at', 'desc')
     .limit(limit);
+
+  if (workspaceId) {
+    query = query.where('workspace_id', '=', workspaceId);
+  }
 
   if (params.tags && params.tags.length > 0) {
     // Filter by tags (JSON contains)

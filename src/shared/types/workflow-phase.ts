@@ -8,7 +8,7 @@ export type GitStrategy =
 export interface WorkflowPhaseConfig {
   permission_mode?: PhasePermissionMode;
   agent_type?: CliAgentType;
-  git_strategy?: GitStrategy;
+  decisions?: boolean;
   relay?: RelayMode;
   loop_to?: number;
   max_iterations?: number;

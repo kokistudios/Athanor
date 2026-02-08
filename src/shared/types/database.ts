@@ -29,6 +29,7 @@ export interface WorkflowTable {
   user_id: string;
   name: string;
   description: string | null;
+  git_strategy: string | null;
   created_at: Generated<string>;
   updated_at: Generated<string>;
 }
@@ -106,6 +107,7 @@ export interface DecisionTable {
   id: string;
   session_id: string;
   agent_id: string | null;
+  workspace_id: string | null;
   question: string;
   choice: string;
   alternatives: string | null;

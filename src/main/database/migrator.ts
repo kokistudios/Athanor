@@ -9,6 +9,8 @@ import * as m005 from './migrations/005_add_session_git_strategy';
 import * as m006 from './migrations/006_multi_repo_workspaces';
 import * as m007 from './migrations/007_relay_and_looping';
 import * as m008 from './migrations/008_agent_loop_iteration';
+import * as m009 from './migrations/009_workflow_git_strategy';
+import * as m010 from './migrations/010_decision_workspace_id';
 
 const migrations: Record<string, Migration> = {
   '001_initial_schema': m001,
@@ -19,6 +21,8 @@ const migrations: Record<string, Migration> = {
   '006_multi_repo_workspaces': m006,
   '007_relay_and_looping': m007,
   '008_agent_loop_iteration': m008,
+  '009_workflow_git_strategy': m009,
+  '010_decision_workspace_id': m010,
 };
 
 class InlineMigrationProvider implements MigrationProvider {

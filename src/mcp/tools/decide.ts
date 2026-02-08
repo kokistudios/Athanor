@@ -15,6 +15,7 @@ export async function athanorDecide(
   db: Kysely<Database>,
   sessionId: string,
   agentId: string,
+  workspaceId: string | null,
   params: z.infer<typeof decideSchema>,
 ): Promise<string> {
   // Record the decision as pending
@@ -26,6 +27,7 @@ export async function athanorDecide(
       id: decisionId,
       session_id: sessionId,
       agent_id: agentId,
+      workspace_id: workspaceId,
       question: params.question,
       choice: params.choice,
       rationale: params.rationale,
